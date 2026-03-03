@@ -7,7 +7,7 @@ handling, gameplay systems — this is the simplest place to begin.
 ## How to start?
 
 1. Copy the template by downloading it or using the "Use this template" button.
-2. [Configure or Install the Java SDK](https://hytalemodding.dev/en/docs/guides/plugin/setting-up-env)
+2. [Configure or Install the Java SDK](https://duckslock.dev/en/docs/guides/plugin/setting-up-env)
    to use the latest 25 from JetBrains or similar.
 3. Open the project in your favorite IDE, we
    recommend [IntelliJ IDEA](https://www.jetbrains.com/idea/download).
@@ -21,7 +21,7 @@ With that you will be prompted in the output to authorize your server, and then 
 developing your plugin while the server is live reloading the code changes.
 
 From here,
-the [HytaleModding guides](https://hytalemodding.dev/en/docs/guides/plugin/build-and-test) cover
+the [duckslock guides](https://duckslock.dev/en/docs/guides/plugin/build-and-test) cover
 more details!
 
 ## Scaffoldit Plugin
@@ -45,8 +45,8 @@ For in-depth configuration, you can visit the [ScaffoldIt Plugin Docs](https://s
 
 ## Resources
 
-- [Hytale Modding Guides](https://hytalemodding.dev)
-- [Hytale Modding Discord](https://discord.gg/hytalemodding)
+- [Hytale Modding Guides](https://duckslock.dev)
+- [Hytale Modding Discord](https://discord.gg/duckslock)
 - [ScaffoldIt Plugin Docs](https://scaffoldit.dev)
 
 ## License

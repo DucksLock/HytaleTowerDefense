@@ -44,3 +44,5 @@ build/
 .kotlin
 devserver
 /.idea/
+# Ignore Gradle build output directory
+build
