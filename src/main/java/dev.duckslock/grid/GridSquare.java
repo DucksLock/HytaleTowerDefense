@@ -20,20 +20,17 @@ public class GridSquare {
      */
     private final int worldX;
     private final int worldZ;
-    /**
-     * Which enclave owns this square (-1 = shared / path / legacy).
-     */
-    private final int enclaveIndex;
+
     private GridSquareType type;
-    /**
-     * UUID of the player whose tower occupies this square, or null if empty.
-     */
+
+    /** Which enclave owns this square (-1 = shared / path / legacy). */
+    private final int enclaveIndex;
+
+    /** UUID of the player whose tower occupies this square, or null if empty. */
     @Nullable
     private UUID towerOwnerUuid;
 
-    /**
-     * Full constructor — used by {@link Enclave}.
-     */
+    /** Full constructor — used by {@link Enclave}. */
     public GridSquare(int gridX, int gridZ,
                       int worldX, int worldZ,
                       GridSquareType type,
@@ -51,7 +48,7 @@ public class GridSquare {
      * worldX/worldZ default to -1; enclaveIndex defaults to -1.
      *
      * @deprecated Use the 6-arg constructor. This will be removed once
-     * GridManager is replaced by EnclaveManager.
+     *             GridManager is replaced by EnclaveManager.
      */
     @Deprecated
     public GridSquare(int gridX, int gridZ, GridSquareType type) {
@@ -67,8 +64,7 @@ public class GridSquare {
     }
 
     public boolean isBuildable() {
-        return type == GridSquareType.BUILDABLE && !isOccupied();
-    }
+        return type == GridSquareType.BUILDABLE && !isOccupied(); }
 
     /**
      * Returns true if the given world-X/Z position falls inside this square's
@@ -85,9 +81,19 @@ public class GridSquare {
     // Mutators
     // -------------------------------------------------------------------------
 
-    public void clearTower() {
-        this.towerOwnerUuid = null;
+    public void setType(GridSquareType type) {
+        this.type = type;
     }
+
+    public void clearTower() {
+        this.towerOwnerUuid = null; }
+
+    public int getEnclaveIndex() {
+        return enclaveIndex; }
+
+    // -------------------------------------------------------------------------
+    // Getters
+    // -------------------------------------------------------------------------
 
     public int getGridX() {
         return gridX;
@@ -96,10 +102,6 @@ public class GridSquare {
     public int getGridZ() {
         return gridZ;
     }
-
-    // -------------------------------------------------------------------------
-    // Getters
-    // -------------------------------------------------------------------------
 
     public int getWorldX() {
         return worldX;
@@ -113,18 +115,9 @@ public class GridSquare {
         return type;
     }
 
-    public void setType(GridSquareType type) {
-        this.type = type;
-    }
-
-    public int getEnclaveIndex() {
-        return enclaveIndex;
-    }
-
     @Nullable
     public UUID getTowerOwner() {
-        return towerOwnerUuid;
-    }
+        return towerOwnerUuid; }
 
     public void setTowerOwner(@Nullable UUID uuid) {
         this.towerOwnerUuid = uuid;
