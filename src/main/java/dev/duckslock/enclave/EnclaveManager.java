@@ -17,16 +17,16 @@ import java.util.logging.Level;
 
 /**
  * Central manager for all eight enclaves.
- * <p>
+ *
  * Responsibilities:
- * 1. Create the eight {@link Enclave} objects at plugin start.
- * 2. Generate the arena blocks in the Hytale world (flat platform + colored
- * enclave areas, all adjacent to each other).
- * 3. Assign enclaves to players as they join, in order (player 1 → RED,
- * player 2 → BLUE, …).
- * 4. Expose helpers so other systems (wave spawner, tower placement, etc.)
- * can query the grid state.
- * <p>
+ *   1. Create the eight {@link Enclave} objects at plugin start.
+ *   2. Generate the arena blocks in the Hytale world (flat platform + colored
+ *      enclave areas, all adjacent to each other).
+ *   3. Assign enclaves to players as they join, in order (player 1 → RED,
+ *      player 2 → BLUE, …).
+ *   4. Expose helpers so other systems (wave spawner, tower placement, etc.)
+ *      can query the grid state.
+ *
  * ── Block placement note ────────────────────────────────────────────────────
  * Block placement uses {@code BlockModule.get().setBlock(world, x, y, z, id, state)}.
  * If that method signature does not match the version of the Hytale server you
@@ -36,8 +36,9 @@ import java.util.logging.Level;
  */
 public class EnclaveManager {
 
-    public static final String WORLD_NAME = "default";
     private static final HytaleLogger LOGGER = HytaleLogger.forEnclosingClass();
+    public static final String WORLD_NAME = "default";
+
     /**
      * The eight enclaves, indexed 0 (RED) through 7 (PINK).
      */
@@ -71,10 +72,10 @@ public class EnclaveManager {
     /**
      * Builds the physical arena.  Must run on the world thread (called via
      * {@code world.execute(...)}).
-     * <p>
+     *
      * Layer overview (all at Y = ARENA_FLOOR_Y):
-     * • Stone sub-floor covering the full arena footprint (path/gap strips).
-     * • Per-enclave: marble border → buildable wooden floor → chalk base row.
+     *   • Stone sub-floor covering the full arena footprint (path/gap strips).
+     *   • Per-enclave: marble border → buildable wooden floor → chalk base row.
      */
     private void generateArena(World world) {
         LOGGER.at(Level.INFO).log("Generating arena at Y=%s ...", ArenaConstants.ARENA_FLOOR_Y);
@@ -146,7 +147,7 @@ public class EnclaveManager {
 
     /**
      * Called by the plugin when a {@code PlayerReadyEvent} fires.
-     * <p>
+     *
      * If the player already owns an enclave (reconnect), they are reminded of
      * it.  Otherwise, the next free enclave (lowest index first) is assigned.
      */
@@ -157,7 +158,7 @@ public class EnclaveManager {
         // Already has an enclave? Just remind them.
         for (Enclave enc : enclaves) {
             if (uuid.equals(enc.getOwnerUuid())) {
-                player.sendMessage(Message.text(
+                player.sendMessage(Message.raw(
                         "[TD] Welcome back " + name + "! "
                                 + "You are " + enc.getColor().getDisplayName()
                                 + " (enclave " + enc.getIndex() + ")."
@@ -171,7 +172,7 @@ public class EnclaveManager {
         // Assign next free enclave.
         Enclave next = getNextFreeEnclave();
         if (next == null) {
-            player.sendMessage(Message.text(
+            player.sendMessage(Message.raw(
                     "[TD] The server is full (all 8 enclaves taken). Please wait."
             ));
             LOGGER.at(Level.WARNING).log("Could not assign enclave to %s: all full.", name);
@@ -179,7 +180,7 @@ public class EnclaveManager {
         }
 
         next.assignOwner(uuid, name);
-        player.sendMessage(Message.text(
+        player.sendMessage(Message.raw(
                 "[TD] Welcome " + name + "! "
                         + "Your colour is " + next.getColor().getDisplayName()
                         + " — enclave " + next.getIndex() + "."
@@ -206,9 +207,7 @@ public class EnclaveManager {
     // Queries used by other systems
     // -------------------------------------------------------------------------
 
-    /**
-     * Returns the enclave owned by the given player, or null.
-     */
+    /** Returns the enclave owned by the given player, or null. */
     @Nullable
     public Enclave getEnclaveForPlayer(UUID playerUuid) {
         for (Enclave enc : enclaves) {
@@ -241,8 +240,7 @@ public class EnclaveManager {
      * Returns enclave by 0-based index.
      */
     public Enclave getEnclave(int index) {
-        return enclaves[index];
-    }
+        return enclaves[index]; }
 
     // -------------------------------------------------------------------------
     // Internal helpers
@@ -275,9 +273,9 @@ public class EnclaveManager {
 
     /**
      * Sets a single block in the world.
-     * <p>
+     *
      * MUST be called on the world thread (inside world.execute(...)).
-     * <p>
+     *
      * If this causes a compile error, check the BlockModule API for your
      * Hytale server version and adjust the body.  The rest of the codebase
      * only calls this method, so nothing else needs changing.
