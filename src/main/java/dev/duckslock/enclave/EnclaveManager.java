@@ -52,6 +52,8 @@ public class EnclaveManager {
     private final AtomicBoolean bootstrapLoopStarted = new AtomicBoolean(false);
     private final AtomicBoolean generationQueued = new AtomicBoolean(false);
     private boolean arenaGenerated = false;
+    @Nullable
+    private EnclaveAssignmentListener assignmentListener;
 
     public EnclaveManager() {
         for (int i = 0; i < ArenaConstants.ENCLAVE_COUNT; i++) {
@@ -145,10 +147,19 @@ public class EnclaveManager {
     public void assignEnclaveToPlayer(Ref<EntityStore> playerEntityRef, Player player, UUID uuid) {
         beginWorldBootstrap();
         World world = Universe.get().getWorld(WORLD_NAME);
+        boolean newAssignment = getEnclaveForPlayer(uuid) == null;
 
         Enclave assigned = resolveOrAssignEnclave(player, uuid);
         if (assigned == null) {
             return;
+        }
+
+        if (assignmentListener != null) {
+            try {
+                assignmentListener.onAssigned(playerEntityRef, uuid, assigned, newAssignment);
+            } catch (RuntimeException ex) {
+                LOGGER.at(Level.WARNING).log("Assignment listener failed: %s", ex.toString());
+            }
         }
 
         if (arenaGenerated) {
@@ -248,6 +259,22 @@ public class EnclaveManager {
 
     public Enclave getEnclave(int index) {
         return enclaves[index];
+    }
+
+    public void setAssignmentListener(@Nullable EnclaveAssignmentListener listener) {
+        this.assignmentListener = listener;
+    }
+
+    public boolean isArenaGenerated() {
+        return arenaGenerated;
+    }
+
+    public void runAfterArenaGenerated(Runnable task) {
+        if (arenaGenerated) {
+            task.run();
+            return;
+        }
+        enqueueAfterGeneration(task);
     }
 
     @Nullable

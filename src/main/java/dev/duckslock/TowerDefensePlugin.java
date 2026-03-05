@@ -11,7 +11,10 @@ import com.hypixel.hytale.server.core.universe.world.WorldConfig;
 import com.hypixel.hytale.server.core.universe.world.WorldConfigProvider;
 import com.hypixel.hytale.server.core.universe.world.worldgen.provider.VoidWorldGenProvider;
 import dev.duckslock.camera.TDCameraController;
+import dev.duckslock.commands.ArenaDebugRoundService;
+import dev.duckslock.commands.DebugRoundCommand;
 import dev.duckslock.enclave.EnclaveManager;
+import dev.duckslock.sprint.SprintMechanicController;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,6 +27,7 @@ public class TowerDefensePlugin extends JavaPlugin {
 
     private static TowerDefensePlugin instance;
     private EnclaveManager enclaveManager;
+    private ArenaDebugRoundService debugRoundService;
     private final TDCameraController cameraController = new TDCameraController();
 
     public TowerDefensePlugin(JavaPluginInit init) {
@@ -37,6 +41,7 @@ public class TowerDefensePlugin extends JavaPlugin {
     @Override
     protected void setup() {
         instance = this;
+        SprintMechanicController.enable(this);
 
         getEventRegistry().register(PrepareUniverseEvent.class, this::onPrepareUniverse);
         getEventRegistry().register(PlayerReadyEvent.class, EnclaveManager.WORLD_NAME, this::onPlayerReady);
@@ -49,11 +54,18 @@ public class TowerDefensePlugin extends JavaPlugin {
     protected void start() {
         enclaveManager = new EnclaveManager();
         enclaveManager.beginWorldBootstrap();
+        debugRoundService = new ArenaDebugRoundService(enclaveManager);
+        debugRoundService.start();
+        enclaveManager.setAssignmentListener(debugRoundService);
+        getCommandRegistry().registerCommand(new DebugRoundCommand(debugRoundService));
         getLogger().at(Level.INFO).log("Tower Defense plugin started.");
     }
 
     @Override
     protected void shutdown() {
+        if (debugRoundService != null) {
+            debugRoundService.shutdown();
+        }
         getLogger().at(Level.INFO).log("Tower Defense plugin shut down.");
     }
 
