@@ -44,9 +44,7 @@ public class TowerDefensePlugin extends JavaPlugin {
                 .register(PlayerReadyEvent.class, EnclaveManager.WORLD_NAME,
                         this::onPlayerReady);
 
-        getEventRegistry()
-                .register(PlayerDisconnectEvent.class, EnclaveManager.WORLD_NAME,
-                        this::onPlayerDisconnect);
+        getEventRegistry().register(PlayerDisconnectEvent.class, this::onPlayerDisconnect);
 
         getLogger().at(Level.INFO).log("Tower Defense plugin set up.");
     }
