@@ -1,27 +1,57 @@
 package dev.duckslock.enclave;
 
+import com.hypixel.hytale.component.Ref;
+import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.logger.HytaleLogger;
 import com.hypixel.hytale.math.util.ChunkUtil;
+import com.hypixel.hytale.math.vector.Vector3d;
+import com.hypixel.hytale.math.vector.Vector3f;
 import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
 import com.hypixel.hytale.server.core.entity.entities.Player;
+import com.hypixel.hytale.server.core.modules.entity.EntityModule;
+import com.hypixel.hytale.server.core.modules.entity.teleport.Teleport;
 import com.hypixel.hytale.server.core.universe.Universe;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.chunk.WorldChunk;
+import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import dev.duckslock.grid.ArenaConstants;
 import dev.duckslock.grid.GridSquare;
 import dev.duckslock.grid.GridSquareType;
 
 import javax.annotation.Nullable;
-import java.util.UUID;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 
 public class EnclaveManager {
 
     public static final String WORLD_NAME = "default";
     private static final HytaleLogger LOGGER = HytaleLogger.forEnclosingClass();
+    private static final String ARENA_MARKER_FILE = "td_arena_generated.marker";
+    private static final int PRELOAD_MARGIN_CHUNKS = 2;
+    private static final long BOOTSTRAP_POLL_MS = 500L;
 
     private final Enclave[] enclaves = new Enclave[ArenaConstants.ENCLAVE_COUNT];
+    private final Set<String> missingBlockTypeNames = new HashSet<>();
+    private final List<Runnable> pendingAfterGeneration = new ArrayList<>();
+    private final ScheduledExecutorService bootstrapExecutor =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "td-arena-bootstrap");
+                t.setDaemon(true);
+                return t;
+            });
+    private final AtomicBoolean bootstrapLoopStarted = new AtomicBoolean(false);
+    private final AtomicBoolean generationQueued = new AtomicBoolean(false);
+    private boolean arenaGenerated = false;
 
     public EnclaveManager() {
         for (int i = 0; i < ArenaConstants.ENCLAVE_COUNT; i++) {
@@ -30,14 +60,29 @@ public class EnclaveManager {
 
         LOGGER.at(Level.INFO).log("Initialized %s enclaves.", ArenaConstants.ENCLAVE_COUNT);
         logLayout();
+    }
 
-        World world = Universe.get().getWorld(WORLD_NAME);
-        if (world == null) {
-            LOGGER.at(Level.SEVERE).log("World '%s' not found, arena generation skipped.", WORLD_NAME);
+    public void beginWorldBootstrap() {
+        if (!bootstrapLoopStarted.compareAndSet(false, true)) {
             return;
         }
 
-        world.execute(() -> generateArena(world));
+        bootstrapExecutor.scheduleWithFixedDelay(this::tryBootstrapArena,
+                0L, BOOTSTRAP_POLL_MS, TimeUnit.MILLISECONDS);
+    }
+
+    private void tryBootstrapArena() {
+        if (arenaGenerated) {
+            stopBootstrapLoop();
+            return;
+        }
+
+        World world = Universe.get().getWorld(WORLD_NAME);
+        if (world == null) {
+            return;
+        }
+
+        queueArenaGeneration(world);
     }
 
     private void generateArena(World world) {
@@ -96,7 +141,35 @@ public class EnclaveManager {
         }
     }
 
-    public void assignEnclaveToPlayer(Player player, UUID uuid) {
+    // signature now takes playerEntityRef so we can teleport
+    public void assignEnclaveToPlayer(Ref<EntityStore> playerEntityRef, Player player, UUID uuid) {
+        beginWorldBootstrap();
+        World world = Universe.get().getWorld(WORLD_NAME);
+
+        Enclave assigned = resolveOrAssignEnclave(player, uuid);
+        if (assigned == null) {
+            return;
+        }
+
+        if (arenaGenerated) {
+            if (world != null) {
+                world.execute(() -> doTeleport(playerEntityRef, assigned));
+            }
+            return;
+        }
+
+        enqueueAfterGeneration(() -> doTeleport(playerEntityRef, assigned));
+        if (world == null) {
+            LOGGER.at(Level.WARNING).log("World '%s' not available yet, delaying arena generation.", WORLD_NAME);
+            return;
+        }
+
+        queueArenaGeneration(world);
+    }
+
+    // resolves reconnect or assigns new enclave, sends chat msg, returns the enclave
+    @Nullable
+    private Enclave resolveOrAssignEnclave(Player player, UUID uuid) {
         String name = player.getDisplayName();
 
         for (Enclave enclave : enclaves) {
@@ -105,15 +178,15 @@ public class EnclaveManager {
                         + enclave.getColor().getDisplayName() + " (enclave " + enclave.getIndex() + ")."));
                 LOGGER.at(Level.INFO).log("%s reconnected to enclave %s (%s).",
                         name, enclave.getIndex(), enclave.getColor().getDisplayName());
-                return;
+                return enclave;
             }
         }
 
         Enclave next = getNextFreeEnclave();
         if (next == null) {
-            player.sendMessage(Message.raw("[TD] Server full, all 8 enclaves taken."));
+            player.sendMessage(Message.raw("[TD] Server full, all enclaves taken."));
             LOGGER.at(Level.WARNING).log("Could not assign enclave to %s: all full.", name);
-            return;
+            return null;
         }
 
         next.assignOwner(uuid, name);
@@ -121,6 +194,20 @@ public class EnclaveManager {
                 + next.getColor().getDisplayName() + " (enclave " + next.getIndex() + ")."));
         LOGGER.at(Level.INFO).log("Assigned %s to enclave %s (%s).",
                 name, next.getIndex(), next.getColor().getDisplayName());
+        return next;
+    }
+
+    // teleport player to centre of their enclave, 1 above floor - must run on world thread
+    private void doTeleport(Ref<EntityStore> ref, Enclave enclave) {
+        if (!ref.isValid()) return;
+        Store<EntityStore> store = ref.getStore();
+        double cx = enclave.getCentreWorldX() + 0.5;
+        double cy = ArenaConstants.ARENA_FLOOR_Y + 1.0;
+        double cz = enclave.getCentreWorldZ() + 0.5;
+        store.addComponent(ref, EntityModule.get().getTeleportComponentType(),
+                new Teleport(new Vector3d(cx, cy, cz), new Vector3f(0f, 0f, 0f)));
+        LOGGER.at(Level.INFO).log("Teleported to enclave %s at (%.1f, %.1f, %.1f)",
+                enclave.getIndex(), cx, cy, cz);
     }
 
     public void releaseEnclave(UUID playerUuid) {
@@ -166,11 +253,118 @@ public class EnclaveManager {
     @Nullable
     private Enclave getNextFreeEnclave() {
         for (Enclave enclave : enclaves) {
-            if (!enclave.isOwned()) {
-                return enclave;
-            }
+            if (!enclave.isOwned()) return enclave;
         }
         return null;
+    }
+
+    private void queueArenaGeneration(World world) {
+        if (arenaGenerated || !generationQueued.compareAndSet(false, true)) {
+            return;
+        }
+
+        preloadArenaChunks(world).whenComplete((ignored, preloadError) -> {
+            if (preloadError != null) {
+                LOGGER.at(Level.WARNING).log("Chunk preload failed before arena generation: %s", preloadError.toString());
+            }
+
+            world.execute(() -> {
+                try {
+                    ensureArenaGenerated(world);
+                } finally {
+                    generationQueued.set(false);
+                    if (arenaGenerated) {
+                        stopBootstrapLoop();
+                    }
+                }
+            });
+        });
+    }
+
+    private CompletableFuture<Void> preloadArenaChunks(World world) {
+        int minX = ArenaConstants.ARENA_ORIGIN_X - PRELOAD_MARGIN_CHUNKS * ChunkUtil.SIZE;
+        int minZ = ArenaConstants.ARENA_ORIGIN_Z - PRELOAD_MARGIN_CHUNKS * ChunkUtil.SIZE;
+        int maxX = ArenaConstants.ARENA_ORIGIN_X + ArenaConstants.totalArenaWidth() - 1 + PRELOAD_MARGIN_CHUNKS * ChunkUtil.SIZE;
+        int maxZ = ArenaConstants.ARENA_ORIGIN_Z + ArenaConstants.totalArenaDepth() - 1 + PRELOAD_MARGIN_CHUNKS * ChunkUtil.SIZE;
+
+        int minChunkX = ChunkUtil.chunkCoordinate(minX);
+        int minChunkZ = ChunkUtil.chunkCoordinate(minZ);
+        int maxChunkX = ChunkUtil.chunkCoordinate(maxX);
+        int maxChunkZ = ChunkUtil.chunkCoordinate(maxZ);
+
+        List<CompletableFuture<WorldChunk>> futures = new ArrayList<>();
+        for (int cx = minChunkX; cx <= maxChunkX; cx++) {
+            for (int cz = minChunkZ; cz <= maxChunkZ; cz++) {
+                futures.add(world.getNonTickingChunkAsync(ChunkUtil.indexChunk(cx, cz)));
+            }
+        }
+
+        if (futures.isEmpty()) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        LOGGER.at(Level.INFO).log("Preloading %s chunks for arena bootstrap.", futures.size());
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+    }
+
+    private void ensureArenaGenerated(World world) {
+        if (arenaGenerated) {
+            runPendingAfterGeneration();
+            return;
+        }
+
+        Path marker = world.getSavePath().resolve(ARENA_MARKER_FILE);
+        if (Files.exists(marker)) {
+            arenaGenerated = true;
+            LOGGER.at(Level.INFO).log("Arena already generated (marker found at '%s').", marker);
+            runPendingAfterGeneration();
+            return;
+        }
+
+        generateArena(world);
+        arenaGenerated = true;
+        writeArenaMarker(marker);
+        runPendingAfterGeneration();
+    }
+
+    private void writeArenaMarker(Path markerPath) {
+        try {
+            Files.createDirectories(markerPath.getParent());
+            Files.writeString(markerPath, "generatedAt=" + Instant.now() + System.lineSeparator());
+        } catch (IOException ex) {
+            LOGGER.at(Level.WARNING).log("Failed to write arena marker '%s': %s", markerPath, ex.toString());
+        }
+    }
+
+    private void enqueueAfterGeneration(Runnable task) {
+        synchronized (pendingAfterGeneration) {
+            pendingAfterGeneration.add(task);
+        }
+    }
+
+    private void runPendingAfterGeneration() {
+        List<Runnable> tasks;
+        synchronized (pendingAfterGeneration) {
+            if (pendingAfterGeneration.isEmpty()) {
+                return;
+            }
+            tasks = new ArrayList<>(pendingAfterGeneration);
+            pendingAfterGeneration.clear();
+        }
+
+        for (Runnable task : tasks) {
+            try {
+                task.run();
+            } catch (RuntimeException ex) {
+                LOGGER.at(Level.WARNING).log("Post-generation task failed: %s", ex.toString());
+            }
+        }
+    }
+
+    private void stopBootstrapLoop() {
+        if (!bootstrapExecutor.isShutdown()) {
+            bootstrapExecutor.shutdown();
+        }
     }
 
     private void logLayout() {
@@ -178,25 +372,25 @@ public class EnclaveManager {
             int column = enclave.getIndex() % ArenaConstants.ENCLAVES_PER_ROW;
             int row = enclave.getIndex() / ArenaConstants.ENCLAVES_PER_ROW;
             LOGGER.at(Level.INFO).log("[%s,%s] %s inner=(%s,%s) center=(%s,%s)",
-                    column,
-                    row,
+                    column, row,
                     enclave.getColor().getDisplayName(),
-                    enclave.getWorldStartX(),
-                    enclave.getWorldStartZ(),
-                    enclave.getCentreWorldX(),
-                    enclave.getCentreWorldZ());
+                    enclave.getWorldStartX(), enclave.getWorldStartZ(),
+                    enclave.getCentreWorldX(), enclave.getCentreWorldZ());
         }
     }
 
-    // Single low-level write point for arena generation.
     private void placeBlock(World world, int x, int y, int z, String blockTypeName) {
-        BlockType blockType = BlockType.getAssetMap().getAsset(blockTypeName);
+        BlockType blockType = getBlockType(blockTypeName);
         if (blockType == null) {
-            LOGGER.at(Level.WARNING).log("Unknown block type: %s", blockTypeName);
             return;
         }
 
         int id = BlockType.getAssetMap().getIndex(blockTypeName);
+        if (id < 0) {
+            LOGGER.at(Level.WARNING).log("Block type '%s' has invalid index: %s", blockTypeName, id);
+            return;
+        }
+
         WorldChunk chunk = world.getNonTickingChunk(ChunkUtil.indexChunkFromBlock(x, z));
         if (chunk == null) {
             LOGGER.at(Level.WARNING).log("Chunk not loaded at %s %s", x, z);
@@ -204,5 +398,53 @@ public class EnclaveManager {
         }
 
         chunk.setBlock(x, y, z, id, blockType, 0, 0, 0);
+    }
+
+    @Nullable
+    private BlockType getBlockType(String blockTypeName) {
+        Map<String, BlockType> blockMap;
+        try {
+            blockMap = BlockType.getAssetMap().getAssetMap();
+        } catch (RuntimeException ex) {
+            LOGGER.at(Level.SEVERE).log("Failed to access block asset map for '%s': %s",
+                    blockTypeName, ex.toString());
+            return null;
+        }
+
+        if (blockMap == null || blockMap.isEmpty()) {
+            LOGGER.at(Level.WARNING).log("Block asset map is empty while resolving '%s'.", blockTypeName);
+            return null;
+        }
+
+        BlockType blockType = blockMap.get(blockTypeName);
+        if (blockType == null && missingBlockTypeNames.add(blockTypeName)) {
+            LOGGER.at(Level.WARNING).log("Unknown block type: %s", blockTypeName);
+            logMatchingBlockTypeCandidates(blockMap, blockTypeName);
+        }
+        return blockType;
+    }
+
+    private void logMatchingBlockTypeCandidates(Map<String, BlockType> blockMap, String requestedName) {
+        String requestedLower = requestedName.toLowerCase(Locale.ROOT);
+        int logged = 0;
+        for (String name : blockMap.keySet()) {
+            String lower = name.toLowerCase(Locale.ROOT);
+            if (!lower.contains("wood") && !lower.contains("plank")
+                    && !lower.contains("oak") && !lower.contains("hardwood")) {
+                continue;
+            }
+            if (!requestedLower.contains("wood") && !lower.contains(requestedLower)) {
+                continue;
+            }
+            LOGGER.at(Level.INFO).log("Block candidate: %s", name);
+            logged++;
+            if (logged >= 40) {
+                break;
+            }
+        }
+
+        if (logged == 0) {
+            LOGGER.at(Level.INFO).log("No matching block candidates found for '%s'.", requestedName);
+        }
     }
 }
