@@ -14,6 +14,8 @@ import com.hypixel.hytale.server.core.modules.entity.component.TransformComponen
 import com.hypixel.hytale.server.core.universe.Universe;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+import dev.duckslock.config.ModConfigHolder;
+import dev.duckslock.config.TDConfig;
 import dev.duckslock.enclave.Enclave;
 import dev.duckslock.enclave.EnclaveAssignmentListener;
 import dev.duckslock.enclave.EnclaveManager;
@@ -32,17 +34,15 @@ import java.util.logging.Level;
 public class ArenaDebugRoundService implements EnclaveAssignmentListener {
 
     private static final HytaleLogger LOGGER = HytaleLogger.forEnclosingClass();
-    private static final long MOVEMENT_TICK_MS = 100L;
-    private static final double BASE_MOVE_BLOCKS_PER_SECOND = 2.6d;
-    private static final double WAYPOINT_REACHED_DISTANCE = 0.35d;
-    private static final long ENEMY_SPAWN_SPACING_MS = 300L;
-    private static final long ENTITY_REF_WAIT_TIMEOUT_MS = 4000L;
-    private static final String[] WALK_ANIMATION_CANDIDATES = {
-            "Walk", "walk", "Run", "run", "Movement", "movement", "Locomotion", "locomotion"
-    };
 
     private final EnclaveManager enclaveManager;
     private final EnemySpawner enemySpawner = new EnemySpawner();
+    private final long movementTickMs;
+    private final double baseMoveBlocksPerSecond;
+    private final double waypointReachedDistance;
+    private final long enemySpawnSpacingMs;
+    private final long entityRefWaitTimeoutMs;
+    private final String[] walkAnimationCandidates;
     private final Map<UUID, TrackedEnemy> trackedEnemies = new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler =
             Executors.newSingleThreadScheduledExecutor(r -> {
@@ -51,16 +51,26 @@ public class ArenaDebugRoundService implements EnclaveAssignmentListener {
                 return t;
             });
 
-    private volatile boolean enabled = false;
-    private volatile int activeRoundId = 1;
-    private volatile boolean triggerOnlyOnNewAssignment = true;
+    private volatile boolean enabled;
+    private volatile int activeRoundId;
+    private volatile boolean triggerOnlyOnNewAssignment;
 
     public ArenaDebugRoundService(EnclaveManager enclaveManager) {
         this.enclaveManager = enclaveManager;
+        TDConfig.DebugRoundsConfig config = ModConfigHolder.get().debugRounds;
+        this.movementTickMs = config.movementTickMs;
+        this.baseMoveBlocksPerSecond = config.baseMoveBlocksPerSecond;
+        this.waypointReachedDistance = config.waypointReachedDistance;
+        this.enemySpawnSpacingMs = config.enemySpawnSpacingMs;
+        this.entityRefWaitTimeoutMs = config.entityRefWaitTimeoutMs;
+        this.walkAnimationCandidates = config.walkAnimationCandidates.toArray(new String[0]);
+        this.enabled = config.enabledByDefault;
+        this.activeRoundId = config.activeRoundId;
+        this.triggerOnlyOnNewAssignment = config.triggerOnlyOnNewAssignment;
     }
 
     public void start() {
-        scheduler.scheduleWithFixedDelay(this::scheduleMovementTick, MOVEMENT_TICK_MS, MOVEMENT_TICK_MS, TimeUnit.MILLISECONDS);
+        scheduler.scheduleWithFixedDelay(this::scheduleMovementTick, movementTickMs, movementTickMs, TimeUnit.MILLISECONDS);
     }
 
     public void shutdown() {
@@ -143,7 +153,7 @@ public class ArenaDebugRoundService implements EnclaveAssignmentListener {
         int count = Math.max(1, batch.getCount());
 
         for (int i = 0; i < count; i++) {
-            long delay = i * ENEMY_SPAWN_SPACING_MS;
+            long delay = i * enemySpawnSpacingMs;
             scheduler.schedule(() -> {
                 Vector3f spawnPos = new Vector3f((float) start.x, (float) start.y, (float) start.z);
                 Enemy enemy = enemySpawner.spawn(batch.getEnemyType(), enclave.getIndex(), spawnPos);
@@ -174,7 +184,7 @@ public class ArenaDebugRoundService implements EnclaveAssignmentListener {
     private void moveEnemy(World world, TrackedEnemy tracked) {
         Ref<EntityStore> ref = tracked.enemy.getEntityRef();
         if (ref == null) {
-            if (System.currentTimeMillis() - tracked.createdAtMs > ENTITY_REF_WAIT_TIMEOUT_MS) {
+            if (System.currentTimeMillis() - tracked.createdAtMs > entityRefWaitTimeoutMs) {
                 trackedEnemies.remove(tracked.enemy.getId());
             }
             return;
@@ -206,7 +216,7 @@ public class ArenaDebugRoundService implements EnclaveAssignmentListener {
         double dz = target.z - current.z;
         double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
-        if (distance <= WAYPOINT_REACHED_DISTANCE) {
+        if (distance <= waypointReachedDistance) {
             tracked.nextWaypointIndex++;
             if (tracked.nextWaypointIndex >= tracked.worldWaypoints.size()) {
                 enemySpawner.remove(tracked.enemy);
@@ -225,7 +235,7 @@ public class ArenaDebugRoundService implements EnclaveAssignmentListener {
             return;
         }
 
-        double maxStep = BASE_MOVE_BLOCKS_PER_SECOND * tracked.enemy.getType().speed * (MOVEMENT_TICK_MS / 1000.0d);
+        double maxStep = baseMoveBlocksPerSecond * tracked.enemy.getType().speed * (movementTickMs / 1000.0d);
         double step = Math.min(distance, maxStep);
         double scale = step / distance;
 
@@ -250,7 +260,7 @@ public class ArenaDebugRoundService implements EnclaveAssignmentListener {
             return;
         }
 
-        String animId = modelComponent.getModel().getFirstBoundAnimationId(WALK_ANIMATION_CANDIDATES);
+        String animId = modelComponent.getModel().getFirstBoundAnimationId(walkAnimationCandidates);
         if (animId == null || animId.isBlank()) {
             animId = findAnyMovementLikeAnimation(modelComponent.getModel().getAnimationSetMap().keySet());
         }

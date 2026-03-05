@@ -1,5 +1,11 @@
 package dev.duckslock.enemy;
 
+import com.hypixel.hytale.logger.HytaleLogger;
+import dev.duckslock.config.TDConfig;
+
+import java.util.Map;
+import java.util.logging.Level;
+
 // one entry per enemy type - stats + which model to spawn
 public enum EnemyType {
 
@@ -13,22 +19,44 @@ public enum EnemyType {
     ELITE(EnemyAssets.OUTLANDER_BRUTE, 300, 0.9f, 0.40f, 25, 2, false),
     GOLEM(EnemyAssets.EARTHEN_GOLEM, 1500, 0.5f, 0.40f, 80, 5, true);
 
-    public final String assetId;
-    public final int maxHp;
-    public final float speed;   // multiplier, 1.0 = normal
-    public final float armor;   // 0.0-1.0 damage reduction
-    public final int bounty;  // gold on kill
-    public final int damage;  // lives deducted on base reach
-    public final boolean isBoss;
+    private final TDConfig.EnemyConfig defaults;
+
+    public String assetId;
+    public int maxHp;
+    public float speed;   // multiplier, 1.0 = normal
+    public float armor;   // 0.0-1.0 damage reduction
+    public int bounty;    // gold on kill
+    public int damage;    // lives deducted on base reach
+    public boolean isBoss;
 
     EnemyType(String assetId, int maxHp, float speed, float armor,
               int bounty, int damage, boolean isBoss) {
-        this.assetId = assetId;
-        this.maxHp = maxHp;
-        this.speed = speed;
-        this.armor = armor;
-        this.bounty = bounty;
-        this.damage = damage;
-        this.isBoss = isBoss;
+        this.defaults = new TDConfig.EnemyConfig(assetId, maxHp, speed, armor, bounty, damage, isBoss);
+        apply(defaults);
+    }
+
+    public static void applyConfig(Map<String, TDConfig.EnemyConfig> configured, HytaleLogger logger) {
+        for (EnemyType type : values()) {
+            TDConfig.EnemyConfig config = configured != null ? configured.get(type.name()) : null;
+            if (config == null) {
+                config = type.defaults.copy();
+            } else {
+                config = config.copy();
+            }
+            config.sanitize();
+            type.apply(config);
+            logger.at(Level.INFO).log("Enemy '%s' configured: asset=%s hp=%s speed=%.3f",
+                    type.name(), type.assetId, type.maxHp, type.speed);
+        }
+    }
+
+    private void apply(TDConfig.EnemyConfig config) {
+        this.assetId = config.assetId;
+        this.maxHp = config.maxHp;
+        this.speed = config.speed;
+        this.armor = config.armor;
+        this.bounty = config.bounty;
+        this.damage = config.damage;
+        this.isBoss = config.boss;
     }
 }

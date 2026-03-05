@@ -15,6 +15,8 @@ import com.hypixel.hytale.server.core.universe.Universe;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.chunk.WorldChunk;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+import dev.duckslock.config.ModConfigHolder;
+import dev.duckslock.config.TDConfig;
 import dev.duckslock.grid.ArenaConstants;
 import dev.duckslock.grid.GridSquare;
 import dev.duckslock.grid.GridSquareType;
@@ -34,13 +36,13 @@ import java.util.logging.Level;
 
 public class EnclaveManager {
 
-    public static final String WORLD_NAME = "default";
+    public static String WORLD_NAME = "default";
     private static final HytaleLogger LOGGER = HytaleLogger.forEnclosingClass();
-    private static final String ARENA_MARKER_FILE = "td_arena_generated.marker";
-    private static final int PRELOAD_MARGIN_CHUNKS = 2;
-    private static final long BOOTSTRAP_POLL_MS = 500L;
 
     private final Enclave[] enclaves = new Enclave[ArenaConstants.ENCLAVE_COUNT];
+    private final String arenaMarkerFile;
+    private final int preloadMarginChunks;
+    private final long bootstrapPollMs;
     private final Set<String> missingBlockTypeNames = new HashSet<>();
     private final List<Runnable> pendingAfterGeneration = new ArrayList<>();
     private final ScheduledExecutorService bootstrapExecutor =
@@ -56,6 +58,11 @@ public class EnclaveManager {
     private EnclaveAssignmentListener assignmentListener;
 
     public EnclaveManager() {
+        TDConfig.WorldConfig worldConfig = ModConfigHolder.get().world;
+        this.arenaMarkerFile = worldConfig.arenaMarkerFile;
+        this.preloadMarginChunks = worldConfig.preloadMarginChunks;
+        this.bootstrapPollMs = worldConfig.bootstrapPollMs;
+
         for (int i = 0; i < ArenaConstants.ENCLAVE_COUNT; i++) {
             enclaves[i] = new Enclave(i, EnclaveColor.fromIndex(i));
         }
@@ -64,13 +71,10 @@ public class EnclaveManager {
         logLayout();
     }
 
-    public void beginWorldBootstrap() {
-        if (!bootstrapLoopStarted.compareAndSet(false, true)) {
-            return;
+    public static void setWorldName(String worldName) {
+        if (worldName != null && !worldName.isBlank()) {
+            WORLD_NAME = worldName;
         }
-
-        bootstrapExecutor.scheduleWithFixedDelay(this::tryBootstrapArena,
-                0L, BOOTSTRAP_POLL_MS, TimeUnit.MILLISECONDS);
     }
 
     private void tryBootstrapArena() {
@@ -308,11 +312,20 @@ public class EnclaveManager {
         });
     }
 
+    public void beginWorldBootstrap() {
+        if (!bootstrapLoopStarted.compareAndSet(false, true)) {
+            return;
+        }
+
+        bootstrapExecutor.scheduleWithFixedDelay(this::tryBootstrapArena,
+                0L, bootstrapPollMs, TimeUnit.MILLISECONDS);
+    }
+
     private CompletableFuture<Void> preloadArenaChunks(World world) {
-        int minX = ArenaConstants.ARENA_ORIGIN_X - PRELOAD_MARGIN_CHUNKS * ChunkUtil.SIZE;
-        int minZ = ArenaConstants.ARENA_ORIGIN_Z - PRELOAD_MARGIN_CHUNKS * ChunkUtil.SIZE;
-        int maxX = ArenaConstants.ARENA_ORIGIN_X + ArenaConstants.totalArenaWidth() - 1 + PRELOAD_MARGIN_CHUNKS * ChunkUtil.SIZE;
-        int maxZ = ArenaConstants.ARENA_ORIGIN_Z + ArenaConstants.totalArenaDepth() - 1 + PRELOAD_MARGIN_CHUNKS * ChunkUtil.SIZE;
+        int minX = ArenaConstants.ARENA_ORIGIN_X - preloadMarginChunks * ChunkUtil.SIZE;
+        int minZ = ArenaConstants.ARENA_ORIGIN_Z - preloadMarginChunks * ChunkUtil.SIZE;
+        int maxX = ArenaConstants.ARENA_ORIGIN_X + ArenaConstants.totalArenaWidth() - 1 + preloadMarginChunks * ChunkUtil.SIZE;
+        int maxZ = ArenaConstants.ARENA_ORIGIN_Z + ArenaConstants.totalArenaDepth() - 1 + preloadMarginChunks * ChunkUtil.SIZE;
 
         int minChunkX = ChunkUtil.chunkCoordinate(minX);
         int minChunkZ = ChunkUtil.chunkCoordinate(minZ);
@@ -332,26 +345,6 @@ public class EnclaveManager {
 
         LOGGER.at(Level.INFO).log("Preloading %s chunks for arena bootstrap.", futures.size());
         return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
-    }
-
-    private void ensureArenaGenerated(World world) {
-        if (arenaGenerated) {
-            runPendingAfterGeneration();
-            return;
-        }
-
-        Path marker = world.getSavePath().resolve(ARENA_MARKER_FILE);
-        if (Files.exists(marker)) {
-            arenaGenerated = true;
-            LOGGER.at(Level.INFO).log("Arena already generated (marker found at '%s').", marker);
-            runPendingAfterGeneration();
-            return;
-        }
-
-        generateArena(world);
-        arenaGenerated = true;
-        writeArenaMarker(marker);
-        runPendingAfterGeneration();
     }
 
     private void writeArenaMarker(Path markerPath) {
@@ -392,6 +385,26 @@ public class EnclaveManager {
         if (!bootstrapExecutor.isShutdown()) {
             bootstrapExecutor.shutdown();
         }
+    }
+
+    private void ensureArenaGenerated(World world) {
+        if (arenaGenerated) {
+            runPendingAfterGeneration();
+            return;
+        }
+
+        Path marker = world.getSavePath().resolve(arenaMarkerFile);
+        if (Files.exists(marker)) {
+            arenaGenerated = true;
+            LOGGER.at(Level.INFO).log("Arena already generated (marker found at '%s').", marker);
+            runPendingAfterGeneration();
+            return;
+        }
+
+        generateArena(world);
+        arenaGenerated = true;
+        writeArenaMarker(marker);
+        runPendingAfterGeneration();
     }
 
     private void logLayout() {

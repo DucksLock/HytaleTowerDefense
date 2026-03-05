@@ -2,31 +2,31 @@ package dev.duckslock.commands;
 
 import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.command.system.CommandContext;
-import com.hypixel.hytale.server.core.command.system.arguments.system.OptionalArg;
-import com.hypixel.hytale.server.core.command.system.arguments.system.RequiredArg;
-import com.hypixel.hytale.server.core.command.system.arguments.types.ArgTypes;
 import com.hypixel.hytale.server.core.command.system.basecommands.CommandBase;
 import dev.duckslock.enclave.Enclave;
+
+import java.util.Arrays;
+import java.util.Locale;
 
 public class DebugRoundCommand extends CommandBase {
 
     private final ArenaDebugRoundService debugService;
-    private final RequiredArg<String> actionArg;
-    private final OptionalArg<Integer> arg1;
-    private final OptionalArg<Integer> arg2;
 
     public DebugRoundCommand(ArenaDebugRoundService debugService) {
         super("tddebuground", "Tower defense debug round controls.");
         this.debugService = debugService;
-
-        actionArg = withRequiredArg("action", "Action: status|enable|disable|set|spawn|newonly", ArgTypes.STRING);
-        arg1 = withOptionalArg("arg1", "First integer argument", ArgTypes.INTEGER);
-        arg2 = withOptionalArg("arg2", "Second integer argument", ArgTypes.INTEGER);
+        setAllowsExtraArguments(true);
     }
 
     @Override
     protected void executeSync(CommandContext ctx) {
-        String action = ctx.get(actionArg).toLowerCase();
+        String[] tokens = normalizeTokens(ctx.getInputString());
+        if (tokens.length == 0) {
+            sendUsage(ctx);
+            return;
+        }
+
+        String action = tokens[0].toLowerCase(Locale.ROOT);
         switch (action) {
             case "status" -> sendStatus(ctx);
             case "enable" -> {
@@ -37,38 +37,42 @@ public class DebugRoundCommand extends CommandBase {
                 debugService.setEnabled(false);
                 ctx.sendMessage(Message.raw("[TD] Debug round auto-spawn disabled."));
             }
-            case "set" -> {
-                Integer roundId = getIntArg(ctx, arg1);
-                if (roundId == null) {
-                    ctx.sendMessage(Message.raw("[TD] Usage: /tddebuground set <roundId>"));
-                    return;
-                }
-                if (DebugRoundDefinitions.get(roundId) == null) {
-                    ctx.sendMessage(Message.raw("[TD] Unknown round id: " + roundId
-                            + " (available: " + DebugRoundDefinitions.ids() + ")"));
-                    return;
-                }
-                debugService.setActiveRoundId(roundId);
-                ctx.sendMessage(Message.raw("[TD] Active debug round set to " + roundId + "."));
-            }
-            case "newonly" -> {
-                Integer toggle = getIntArg(ctx, arg1);
-                if (toggle == null || (toggle != 0 && toggle != 1)) {
-                    ctx.sendMessage(Message.raw("[TD] Usage: /tddebuground newonly <1|0>"));
-                    return;
-                }
-                debugService.setTriggerOnlyOnNewAssignment(toggle == 1);
-                ctx.sendMessage(Message.raw("[TD] Trigger mode set to new-assignment-only="
-                        + debugService.isTriggerOnlyOnNewAssignment()));
-            }
-            case "spawn" -> spawnCommand(ctx);
+            case "set" -> setRound(ctx, tokens);
+            case "newonly" -> setNewOnly(ctx, tokens);
+            case "spawn" -> spawnCommand(ctx, tokens);
             default -> sendUsage(ctx);
         }
     }
 
-    private void spawnCommand(CommandContext ctx) {
-        Integer enclaveIndex = getIntArg(ctx, arg1);
-        Integer roundOverride = getIntArg(ctx, arg2);
+    private void setRound(CommandContext ctx, String[] tokens) {
+        Integer roundId = parseInt(tokens, 1);
+        if (roundId == null) {
+            ctx.sendMessage(Message.raw("[TD] Usage: /tddebuground set <roundId>"));
+            return;
+        }
+        if (DebugRoundDefinitions.get(roundId) == null) {
+            ctx.sendMessage(Message.raw("[TD] Unknown round id: " + roundId
+                    + " (available: " + DebugRoundDefinitions.ids() + ")"));
+            return;
+        }
+        debugService.setActiveRoundId(roundId);
+        ctx.sendMessage(Message.raw("[TD] Active debug round set to " + roundId + "."));
+    }
+
+    private void setNewOnly(CommandContext ctx, String[] tokens) {
+        Integer toggle = parseInt(tokens, 1);
+        if (toggle == null || (toggle != 0 && toggle != 1)) {
+            ctx.sendMessage(Message.raw("[TD] Usage: /tddebuground newonly <1|0>"));
+            return;
+        }
+        debugService.setTriggerOnlyOnNewAssignment(toggle == 1);
+        ctx.sendMessage(Message.raw("[TD] Trigger mode set to new-assignment-only="
+                + debugService.isTriggerOnlyOnNewAssignment()));
+    }
+
+    private void spawnCommand(CommandContext ctx, String[] tokens) {
+        Integer enclaveIndex = parseInt(tokens, 1);
+        Integer roundOverride = parseInt(tokens, 2);
 
         if (ctx.isPlayer()) {
             Enclave enclave = debugService.findEnclaveForPlayer(ctx.sender().getUuid());
@@ -121,7 +125,33 @@ public class DebugRoundCommand extends CommandBase {
         ctx.sendMessage(Message.raw("[TD] /tddebuground spawn [enclaveIndex] [roundId]"));
     }
 
-    private Integer getIntArg(CommandContext ctx, OptionalArg<Integer> arg) {
-        return ctx.provided(arg) ? ctx.get(arg) : null;
+    private String[] normalizeTokens(String input) {
+        if (input == null || input.isBlank()) {
+            return new String[0];
+        }
+
+        String[] raw = input.trim().split("\\s+");
+        if (raw.length == 0) {
+            return raw;
+        }
+
+        String first = raw[0];
+        if ("/tddebuground".equalsIgnoreCase(first) || "tddebuground".equalsIgnoreCase(first)) {
+            return Arrays.copyOfRange(raw, 1, raw.length);
+        }
+
+        return raw;
+    }
+
+    private Integer parseInt(String[] tokens, int index) {
+        if (index < 0 || index >= tokens.length) {
+            return null;
+        }
+
+        try {
+            return Integer.parseInt(tokens[index]);
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 }

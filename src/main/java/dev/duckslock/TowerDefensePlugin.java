@@ -13,7 +13,13 @@ import com.hypixel.hytale.server.core.universe.world.worldgen.provider.VoidWorld
 import dev.duckslock.camera.TDCameraController;
 import dev.duckslock.commands.ArenaDebugRoundService;
 import dev.duckslock.commands.DebugRoundCommand;
+import dev.duckslock.commands.DebugRoundDefinitions;
+import dev.duckslock.config.ModConfigHolder;
+import dev.duckslock.config.TDConfig;
+import dev.duckslock.config.TDConfigManager;
 import dev.duckslock.enclave.EnclaveManager;
+import dev.duckslock.enemy.EnemyType;
+import dev.duckslock.grid.ArenaConstants;
 import dev.duckslock.sprint.SprintMechanicController;
 
 import java.nio.file.Files;
@@ -29,6 +35,7 @@ public class TowerDefensePlugin extends JavaPlugin {
     private EnclaveManager enclaveManager;
     private ArenaDebugRoundService debugRoundService;
     private final TDCameraController cameraController = new TDCameraController();
+    private TDConfig config;
 
     public TowerDefensePlugin(JavaPluginInit init) {
         super(init);
@@ -41,6 +48,13 @@ public class TowerDefensePlugin extends JavaPlugin {
     @Override
     protected void setup() {
         instance = this;
+        config = TDConfigManager.loadOrCreate(getDataDirectory().resolve("config.json"), getLogger());
+        ModConfigHolder.set(config);
+        getLogger().at(Level.INFO).log("Using config at '%s'.", getDataDirectory().resolve("config.json"));
+        ArenaConstants.apply(config.arena);
+        EnclaveManager.setWorldName(config.world.name);
+        EnemyType.applyConfig(config.enemies, getLogger());
+        DebugRoundDefinitions.replaceFromConfig(config.debugRounds.rounds);
         SprintMechanicController.enable(this);
 
         getEventRegistry().register(PrepareUniverseEvent.class, this::onPrepareUniverse);
@@ -81,7 +95,8 @@ public class TowerDefensePlugin extends JavaPlugin {
             return;
         }
 
-        cameraController.apply(playerRef.getPacketHandler());
+        cameraController.apply(playerRef.getPacketHandler(), config.camera);
+        SprintMechanicController.applyPlayerSettings(player);
         enclaveManager.assignEnclaveToPlayer(event.getPlayerRef(), player, player.getUuid());
     }
 

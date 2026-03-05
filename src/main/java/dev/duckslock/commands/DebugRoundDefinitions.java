@@ -1,76 +1,98 @@
 package dev.duckslock.commands;
 
+import com.hypixel.hytale.logger.HytaleLogger;
 import com.hypixel.hytale.math.vector.Vector3d;
+import dev.duckslock.config.TDConfig;
 import dev.duckslock.enemy.EnemyType;
 
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
+import java.util.*;
+import java.util.logging.Level;
 
-/**
- * Keep debug rounds in one place so you can tweak composition/path quickly.
- * <p>
- * Coordinates are LOCAL to the enclave inner area:
- * - x/z: offset from enclave.getWorldStartX/Z()
- * - y: offset from ArenaConstants.ARENA_FLOOR_Y
- */
 public final class DebugRoundDefinitions {
 
-    private static final Map<Integer, DebugRoundDefinition> ROUNDS = Map.of(
-            1, new DebugRoundDefinition(
-                    "Starter",
-                    List.of(
-                            new Vector3d(1.5, 1.0, 1.5),
-                            new Vector3d(18.5, 1.0, 1.5),
-                            new Vector3d(18.5, 1.0, 10.5),
-                            new Vector3d(10.5, 1.0, 18.5),
-                            new Vector3d(1.5, 1.0, 18.5)
-                    ),
-                    List.of(
-                            new DebugRoundDefinition.SpawnBatch(0L, EnemyType.GRUNT, 6),
-                            new DebugRoundDefinition.SpawnBatch(2500L, EnemyType.RUNNER, 4)
-                    )
-            ),
-            2, new DebugRoundDefinition(
-                    "Mixed",
-                    List.of(
-                            new Vector3d(1.5, 1.0, 1.5),
-                            new Vector3d(18.5, 1.0, 1.5),
-                            new Vector3d(18.5, 1.0, 18.5),
-                            new Vector3d(1.5, 1.0, 18.5)
-                    ),
-                    List.of(
-                            new DebugRoundDefinition.SpawnBatch(0L, EnemyType.GRUNT, 8),
-                            new DebugRoundDefinition.SpawnBatch(3000L, EnemyType.SOLDIER, 4),
-                            new DebugRoundDefinition.SpawnBatch(6000L, EnemyType.RUNNER, 6)
-                    )
-            ),
-            3, new DebugRoundDefinition(
-                    "Heavy",
-                    List.of(
-                            new Vector3d(1.5, 1.0, 1.5),
-                            new Vector3d(10.5, 1.0, 1.5),
-                            new Vector3d(18.5, 1.0, 10.5),
-                            new Vector3d(10.5, 1.0, 18.5),
-                            new Vector3d(1.5, 1.0, 10.5)
-                    ),
-                    List.of(
-                            new DebugRoundDefinition.SpawnBatch(0L, EnemyType.BRUTE, 2),
-                            new DebugRoundDefinition.SpawnBatch(2500L, EnemyType.SHIELDED, 4),
-                            new DebugRoundDefinition.SpawnBatch(6000L, EnemyType.ELITE, 2)
-                    )
-            )
-    );
+    private static final HytaleLogger LOGGER = HytaleLogger.forEnclosingClass();
+    private static volatile Map<Integer, DebugRoundDefinition> rounds = Collections.emptyMap();
+
+    static {
+        replaceFromConfig(TDConfig.defaultDebugRounds());
+    }
 
     private DebugRoundDefinitions() {
     }
 
+    public static void replaceFromConfig(List<TDConfig.DebugRoundConfig> configuredRounds) {
+        Map<Integer, DebugRoundDefinition> loaded = parse(configuredRounds);
+        if (loaded.isEmpty()) {
+            loaded = parse(TDConfig.defaultDebugRounds());
+        }
+        rounds = Collections.unmodifiableMap(loaded);
+    }
+
     public static DebugRoundDefinition get(int roundId) {
-        return ROUNDS.get(roundId);
+        return rounds.get(roundId);
     }
 
     public static Set<Integer> ids() {
-        return new TreeSet<>(ROUNDS.keySet());
+        return new TreeSet<>(rounds.keySet());
+    }
+
+    private static Map<Integer, DebugRoundDefinition> parse(Collection<TDConfig.DebugRoundConfig> configuredRounds) {
+        Map<Integer, DebugRoundDefinition> loaded = new LinkedHashMap<>();
+        if (configuredRounds == null) {
+            return loaded;
+        }
+
+        for (TDConfig.DebugRoundConfig round : configuredRounds) {
+            if (round == null || round.id <= 0) {
+                continue;
+            }
+
+            List<Vector3d> waypoints = new ArrayList<>();
+            if (round.localWaypoints != null) {
+                for (TDConfig.Vec3 waypoint : round.localWaypoints) {
+                    if (waypoint == null) {
+                        continue;
+                    }
+                    waypoints.add(new Vector3d(waypoint.x, waypoint.y, waypoint.z));
+                }
+            }
+
+            List<DebugRoundDefinition.SpawnBatch> batches = new ArrayList<>();
+            if (round.batches != null) {
+                for (TDConfig.SpawnBatchConfig batch : round.batches) {
+                    if (batch == null) {
+                        continue;
+                    }
+
+                    EnemyType enemyType;
+                    try {
+                        enemyType = EnemyType.valueOf(batch.enemyType.toUpperCase(Locale.ROOT));
+                    } catch (Exception ex) {
+                        LOGGER.at(Level.WARNING).log(
+                                "Skipping debug round %s batch with invalid enemy type '%s'.",
+                                round.id,
+                                batch.enemyType
+                        );
+                        continue;
+                    }
+
+                    batches.add(new DebugRoundDefinition.SpawnBatch(
+                            Math.max(0L, batch.delayMs),
+                            enemyType,
+                            Math.max(1, batch.count)
+                    ));
+                }
+            }
+
+            if (waypoints.size() < 2 || batches.isEmpty()) {
+                LOGGER.at(Level.WARNING).log("Skipping debug round %s due to invalid waypoints or batches.", round.id);
+                continue;
+            }
+
+            String name = (round.name == null || round.name.isBlank()) ? "Round " + round.id : round.name;
+            loaded.put(round.id, new DebugRoundDefinition(name, waypoints, batches));
+        }
+
+        return loaded;
     }
 }
