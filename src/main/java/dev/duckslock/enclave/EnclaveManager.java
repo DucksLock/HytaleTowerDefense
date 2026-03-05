@@ -1,12 +1,13 @@
 package dev.duckslock.enclave;
 
 import com.hypixel.hytale.logger.HytaleLogger;
+import com.hypixel.hytale.math.util.ChunkUtil;
 import com.hypixel.hytale.server.core.Message;
+import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
 import com.hypixel.hytale.server.core.entity.entities.Player;
-import com.hypixel.hytale.server.core.modules.block.BlockModule;
 import com.hypixel.hytale.server.core.universe.Universe;
 import com.hypixel.hytale.server.core.universe.world.World;
-import com.hypixel.hytale.server.core.util.TempAssetIdUtil;
+import com.hypixel.hytale.server.core.universe.world.chunk.WorldChunk;
 import dev.duckslock.grid.ArenaConstants;
 import dev.duckslock.grid.GridSquare;
 import dev.duckslock.grid.GridSquareType;
@@ -281,7 +282,18 @@ public class EnclaveManager {
      * only calls this method, so nothing else needs changing.
      */
     private void placeBlock(World world, int x, int y, int z, String blockTypeName) {
-        int typeIndex = TempAssetIdUtil.getBlockTypeIndex(blockTypeName);
-        BlockModule.get().setBlock(world, x, y, z, typeIndex, 0);
+        // look up BlockType by name, get chunk, set block
+        BlockType blockType = BlockType.getAssetMap().getAsset(blockTypeName);
+        if (blockType == null) {
+            LOGGER.at(Level.WARNING).log("Unknown block type: %s", blockTypeName);
+            return;
+        }
+        int id = BlockType.getAssetMap().getIndex(blockTypeName);
+        WorldChunk chunk = world.getNonTickingChunk(ChunkUtil.indexChunkFromBlock(x, z));
+        if (chunk == null) {
+            LOGGER.at(Level.WARNING).log("Chunk not loaded at %s %s", x, z);
+            return;
+        }
+        chunk.setBlock(x, y, z, id, blockType, 0, 0, 0);
     }
 }
