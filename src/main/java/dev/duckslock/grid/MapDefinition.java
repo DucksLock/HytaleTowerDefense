@@ -1,20 +1,13 @@
 package dev.duckslock.grid;
 
 /**
- * Defines a map's grid squares and enemy waypoints.
- * In Phase 4 this will be loaded from a JSON file.
- * For Phase 1 testing, MAP_1 is hardcoded.
+ * Static map data. JSON loading can replace this later.
  */
 public class MapDefinition {
 
-    // ------------------------------------------------------------------
-    // MAP 1 — The Ruins (hardcoded for Phase 1 testing)
-    // S-curve path, Zone 1 aesthetic, 10 waves
-    // ------------------------------------------------------------------
     public static final MapDefinition MAP_1 = new MapDefinition(
             "The Ruins",
             new GridSquareData[]{
-                    // Path squares (enemies walk these)
                     new GridSquareData(6, 1, GridSquareType.PATH),
                     new GridSquareData(7, 1, GridSquareType.PATH),
                     new GridSquareData(8, 1, GridSquareType.PATH),
@@ -40,7 +33,6 @@ public class MapDefinition {
                     new GridSquareData(8, 7, GridSquareType.PATH),
                     new GridSquareData(8, 8, GridSquareType.PATH),
 
-                    // Buildable squares (player places towers here)
                     new GridSquareData(1, 1, GridSquareType.BUILDABLE),
                     new GridSquareData(2, 1, GridSquareType.BUILDABLE),
                     new GridSquareData(3, 1, GridSquareType.BUILDABLE),
@@ -62,21 +54,21 @@ public class MapDefinition {
                     new GridSquareData(4, 5, GridSquareType.BUILDABLE),
                     new GridSquareData(5, 5, GridSquareType.BUILDABLE),
                     new GridSquareData(6, 5, GridSquareType.BUILDABLE),
-                    new GridSquareData(7, 5, GridSquareType.BUILDABLE),
+                    new GridSquareData(7, 5, GridSquareType.BUILDABLE)
             },
             new int[][]{
-                    // Waypoints: enemies follow these grid coordinates in order
-                    {8, 0},  // spawn (edge)
+                    {8, 0},
                     {8, 3},
                     {1, 3},
                     {1, 6},
                     {8, 6},
-                    {8, 9},  // base (edge)
+                    {8, 9}
             }
     );
+
     private final String name;
     private final GridSquareData[] squares;
-    private final int[][] waypoints; // {gridX, gridZ} pairs
+    private final int[][] waypoints;
 
     public MapDefinition(String name, GridSquareData[] squares, int[][] waypoints) {
         this.name = name;

@@ -1,8 +1,7 @@
 package dev.duckslock.enclave;
 
 /**
- * The eight player colours, matching classic Warcraft III team colours.
- * Indices 0-7 map directly to enclaves 0-7 in assignment order.
+ * Team color metadata mapped by enclave index.
  */
 public enum EnclaveColor {
 
@@ -15,13 +14,11 @@ public enum EnclaveColor {
     GREEN(6, "Green", "#20C000"),
     PINK(7, "Pink", "#E55BB0");
 
-    // -------------------------------------------------------------------------
-
     public static final EnclaveColor[] VALUES = values();
 
     private final int index;
     private final String displayName;
-    private final String hexColor;   // CSS hex, useful for UI / chat colouring
+    private final String hexColor;
 
     EnclaveColor(int index, String displayName, String hexColor) {
         this.index = index;
@@ -29,12 +26,10 @@ public enum EnclaveColor {
         this.hexColor = hexColor;
     }
 
-    /**
-     * Returns the EnclaveColor for the given 0-based index.
-     * Throws IllegalArgumentException for out-of-range values.
-     */
     public static EnclaveColor fromIndex(int index) {
-        if (index >= 0 && index < VALUES.length) return VALUES[index];
+        if (index >= 0 && index < VALUES.length) {
+            return VALUES[index];
+        }
         throw new IllegalArgumentException("No EnclaveColor for index " + index);
     }
 

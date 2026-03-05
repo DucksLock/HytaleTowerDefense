@@ -4,10 +4,8 @@ import com.hypixel.hytale.server.core.event.events.player.PlayerReadyEvent;
 import dev.duckslock.grid.GridManager;
 import dev.duckslock.wave.WaveManager;
 
-/**
- * Stub — full implementation in Phase 2
- */
 public class GameManager {
+
     private final GridManager gridManager;
     private final WaveManager waveManager;
 
@@ -17,10 +15,10 @@ public class GameManager {
     }
 
     public void onPlayerReady(PlayerReadyEvent event) {
-        // TODO Phase 2: seat player into game session
+        // Phase 2: seat player into a game session.
     }
 
     public void shutdown() {
-        // TODO Phase 2
+        // Phase 2: stop systems and clean up state.
     }
 }

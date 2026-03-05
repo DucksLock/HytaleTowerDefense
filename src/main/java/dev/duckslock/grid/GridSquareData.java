@@ -1,9 +1,10 @@
 package dev.duckslock.grid;
 
 /**
- * Simple data container for a grid square definition.
+ * Immutable value object for map square data.
  */
 public class GridSquareData {
+
     public final int gridX;
     public final int gridZ;
     public final GridSquareType type;

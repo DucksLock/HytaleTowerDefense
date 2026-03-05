@@ -28,10 +28,7 @@ public class TowerDefensePlugin extends JavaPlugin {
     protected void setup() {
         instance = this;
 
-        // PlayerReadyEvent keyed by world name (KeyType = String)
         getEventRegistry().register(PlayerReadyEvent.class, EnclaveManager.WORLD_NAME, this::onPlayerReady);
-
-        // PlayerDisconnectEvent is Void-keyed, no world key
         getEventRegistry().register(PlayerDisconnectEvent.class, this::onPlayerDisconnect);
 
         getLogger().at(Level.INFO).log("Tower Defense plugin set up.");
@@ -39,7 +36,6 @@ public class TowerDefensePlugin extends JavaPlugin {
 
     @Override
     protected void start() {
-        // world ready here, safe to build arena
         enclaveManager = new EnclaveManager();
         getLogger().at(Level.INFO).log("Tower Defense plugin started.");
     }
@@ -51,14 +47,20 @@ public class TowerDefensePlugin extends JavaPlugin {
 
     private void onPlayerReady(PlayerReadyEvent event) {
         var player = event.getPlayer();
-        if (player == null) return;
-        // getPlayerRef() is deprecated but only way to get PlayerRef from PlayerReadyEvent
+        if (player == null || enclaveManager == null) {
+            return;
+        }
+
+        // PlayerReadyEvent still exposes PlayerRef via deprecated API.
         //noinspection deprecation
         cameraController.apply(player.getPlayerRef());
         enclaveManager.assignEnclaveToPlayer(player);
     }
 
     private void onPlayerDisconnect(PlayerDisconnectEvent event) {
+        if (enclaveManager == null) {
+            return;
+        }
         UUID uuid = event.getPlayerRef().getUuid();
         enclaveManager.releaseEnclave(uuid);
     }
