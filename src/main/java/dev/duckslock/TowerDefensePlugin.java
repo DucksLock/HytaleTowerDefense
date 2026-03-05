@@ -1,15 +1,24 @@
 package dev.duckslock;
 
+import com.hypixel.hytale.server.core.event.events.PrepareUniverseEvent;
 import com.hypixel.hytale.server.core.event.events.player.PlayerDisconnectEvent;
 import com.hypixel.hytale.server.core.event.events.player.PlayerReadyEvent;
 import com.hypixel.hytale.server.core.plugin.JavaPlugin;
 import com.hypixel.hytale.server.core.plugin.JavaPluginInit;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
+import com.hypixel.hytale.server.core.universe.world.World;
+import com.hypixel.hytale.server.core.universe.world.WorldConfig;
+import com.hypixel.hytale.server.core.universe.world.WorldConfigProvider;
+import com.hypixel.hytale.server.core.universe.world.worldgen.provider.VoidWorldGenProvider;
 import dev.duckslock.camera.TDCameraController;
 import dev.duckslock.enclave.EnclaveManager;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
+import java.util.stream.Stream;
 
 public class TowerDefensePlugin extends JavaPlugin {
 
@@ -29,6 +38,7 @@ public class TowerDefensePlugin extends JavaPlugin {
     protected void setup() {
         instance = this;
 
+        getEventRegistry().register(PrepareUniverseEvent.class, this::onPrepareUniverse);
         getEventRegistry().register(PlayerReadyEvent.class, EnclaveManager.WORLD_NAME, this::onPlayerReady);
         getEventRegistry().register(PlayerDisconnectEvent.class, this::onPlayerDisconnect);
 
@@ -38,6 +48,7 @@ public class TowerDefensePlugin extends JavaPlugin {
     @Override
     protected void start() {
         enclaveManager = new EnclaveManager();
+        enclaveManager.beginWorldBootstrap();
         getLogger().at(Level.INFO).log("Tower Defense plugin started.");
     }
 
@@ -59,7 +70,7 @@ public class TowerDefensePlugin extends JavaPlugin {
         }
 
         cameraController.apply(playerRef.getPacketHandler());
-        enclaveManager.assignEnclaveToPlayer(player, playerRef.getUuid());
+        enclaveManager.assignEnclaveToPlayer(event.getPlayerRef(), player, player.getUuid());
     }
 
     private void onPlayerDisconnect(PlayerDisconnectEvent event) {
@@ -72,5 +83,56 @@ public class TowerDefensePlugin extends JavaPlugin {
 
     public EnclaveManager getEnclaveManager() {
         return enclaveManager;
+    }
+
+    private void onPrepareUniverse(PrepareUniverseEvent event) {
+        WorldConfigProvider delegate = event.getWorldConfigProvider();
+        event.setWorldConfigProvider(new TDWorldConfigProvider(delegate, getLogger()));
+    }
+
+    private static final class TDWorldConfigProvider implements WorldConfigProvider {
+        private final WorldConfigProvider delegate;
+        private final com.hypixel.hytale.logger.HytaleLogger logger;
+
+        private TDWorldConfigProvider(WorldConfigProvider delegate, com.hypixel.hytale.logger.HytaleLogger logger) {
+            this.delegate = delegate;
+            this.logger = logger;
+        }
+
+        @Override
+        public CompletableFuture<WorldConfig> load(Path worldPath, String worldName) {
+            return delegate.load(worldPath, worldName).thenApply(config -> {
+                if (config == null || !EnclaveManager.WORLD_NAME.equals(worldName)) {
+                    return config;
+                }
+
+                if (!hasGeneratedChunks(worldPath)) {
+                    config.setWorldGenProvider(new VoidWorldGenProvider());
+                    config.setSpawningNPC(false);
+                    config.setIsSpawnMarkersEnabled(false);
+                    config.markChanged();
+                    logger.at(Level.INFO).log("Using VoidWorldGenProvider for new world '%s'.", worldName);
+                }
+                return config;
+            });
+        }
+
+        @Override
+        public CompletableFuture<Void> save(Path worldPath, WorldConfig config, World world) {
+            return delegate.save(worldPath, config, world);
+        }
+
+        private boolean hasGeneratedChunks(Path worldPath) {
+            Path chunks = worldPath.resolve("chunks");
+            if (!Files.isDirectory(chunks)) {
+                return false;
+            }
+            try (Stream<Path> paths = Files.list(chunks)) {
+                return paths.findAny().isPresent();
+            } catch (Exception ex) {
+                logger.at(Level.WARNING).log("Failed to inspect chunks directory '%s': %s", chunks, ex.toString());
+                return false;
+            }
+        }
     }
 }

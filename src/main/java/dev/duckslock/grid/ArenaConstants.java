@@ -17,12 +17,13 @@ public final class ArenaConstants {
     public static final int ENCLAVE_WORLD_SIZE =
             ENCLAVE_GRID_SIZE * SQUARE_SIZE + BORDER_THICKNESS * 2;
 
-    public static final int ARENA_FLOOR_Y = 64;
+    public static final int ARENA_FLOOR_Y = 200;
     public static final int ARENA_ORIGIN_X = 0;
     public static final int ARENA_ORIGIN_Z = 0;
 
     public static final String BLOCK_PATH = "Rock_Stone";
-    public static final String BLOCK_BUILDABLE = "Wood_Planks_Oak";
+    // verified in local Assets.zip (Server/Item/Items/Wood/Hardwood/Wood_Hardwood_Planks.json)
+    public static final String BLOCK_BUILDABLE = "Wood_Hardwood_Planks";
     public static final String BLOCK_BORDER = "Rock_Marble";
     public static final String BLOCK_BASE = "Rock_Chalk";
 
