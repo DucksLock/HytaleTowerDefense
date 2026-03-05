@@ -12,7 +12,7 @@ public class GridManager {
     public void loadMap(MapDefinition map) {
         grid.clear();
         for (GridSquareData data : map.getSquares()) {
-            grid.put(key(data.gridX, data.gridZ), new GridSquare(data.gridX, data.gridZ, data.type));
+            grid.put(key(data.gridX, data.gridZ), new GridSquare(data.gridX, data.gridZ, -1, -1, data.type, -1));
         }
     }
 

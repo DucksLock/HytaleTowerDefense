@@ -2,11 +2,11 @@ package dev.duckslock.camera;
 
 import com.hypixel.hytale.protocol.*;
 import com.hypixel.hytale.protocol.packets.camera.SetServerCamera;
-import com.hypixel.hytale.server.core.universe.PlayerRef;
+import com.hypixel.hytale.server.core.io.PacketHandler;
 
 public class TDCameraController {
 
-    public void apply(PlayerRef playerRef) {
+    public void apply(PacketHandler packetHandler) {
         var settings = new ServerCameraSettings();
 
         settings.positionLerpSpeed = 0.2f;
@@ -28,6 +28,6 @@ public class TDCameraController {
         settings.movementForceRotation = new Direction(0.0f, 0.0f, 0.0f);
 
         var packet = new SetServerCamera(ClientCameraView.Custom, true, settings);
-        playerRef.getPacketHandler().writeNoCache(packet);
+        packetHandler.writeNoCache(packet);
     }
 }

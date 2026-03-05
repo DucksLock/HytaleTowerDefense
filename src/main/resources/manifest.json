@@ -1,6 +1,6 @@
 {
-  "Group": "Duckslock",
-  "Name": "HytaleTowerDefense",
+    "Group": "Duckslock",
+    "Name": "HytaleTowerDefense",
     "Version": "1.0.0",
     "Description": "A Warcraft III-inspired tower defense experience for Hytale.",
     "Authors": [
