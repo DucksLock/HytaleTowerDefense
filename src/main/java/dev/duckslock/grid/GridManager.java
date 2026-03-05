@@ -1,23 +1,16 @@
 package dev.duckslock.grid;
 
-import com.hypixel.hytale.protocol.Vector3f;
+import com.hypixel.hytale.math.vector.Vector3f;
 
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * Owns the logical grid for the current map.
- * Maps world positions to GridSquares so click detection is instant.
- */
 public class GridManager {
 
-    // Each grid square is this many blocks wide/deep
     public static final int SQUARE_SIZE = 2;
     private final Map<String, GridSquare> grid = new HashMap<>();
 
-    /**
-     * Loads a map's grid. Call this when a game session starts.
-     */
+    // load map squares into lookup table
     public void loadMap(MapDefinition map) {
         grid.clear();
         for (GridSquareData data : map.getSquares()) {
@@ -26,25 +19,19 @@ public class GridManager {
         }
     }
 
-    /**
-     * Returns the GridSquare at a world position, or null if outside the grid.
-     */
+    // find square at world position, null if outside grid
     public GridSquare getSquareAt(Vector3f worldPos) {
         int gx = worldToGrid(worldPos.x);
         int gz = worldToGrid(worldPos.z);
         return grid.get(key(gx, gz));
     }
 
-    /**
-     * Returns the GridSquare at explicit grid coordinates.
-     */
+    // find square by grid coords
     public GridSquare getSquare(int gx, int gz) {
         return grid.get(key(gx, gz));
     }
 
-    /**
-     * Returns the world-space centre of a grid square.
-     */
+    // grid coords to world centre of that square
     public Vector3f gridToWorld(int gx, int gz) {
         float wx = (gx * SQUARE_SIZE) + (SQUARE_SIZE / 2.0f);
         float wz = (gz * SQUARE_SIZE) + (SQUARE_SIZE / 2.0f);
