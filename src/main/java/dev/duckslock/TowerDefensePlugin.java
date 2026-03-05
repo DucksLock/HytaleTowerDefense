@@ -4,6 +4,7 @@ import com.hypixel.hytale.server.core.event.events.player.PlayerDisconnectEvent;
 import com.hypixel.hytale.server.core.event.events.player.PlayerReadyEvent;
 import com.hypixel.hytale.server.core.plugin.JavaPlugin;
 import com.hypixel.hytale.server.core.plugin.JavaPluginInit;
+import com.hypixel.hytale.server.core.universe.PlayerRef;
 import dev.duckslock.camera.TDCameraController;
 import dev.duckslock.enclave.EnclaveManager;
 
@@ -51,10 +52,14 @@ public class TowerDefensePlugin extends JavaPlugin {
             return;
         }
 
-        // PlayerReadyEvent still exposes PlayerRef via deprecated API.
-        //noinspection deprecation
-        cameraController.apply(player.getPlayerRef());
-        enclaveManager.assignEnclaveToPlayer(player);
+        var entityRef = event.getPlayerRef();
+        PlayerRef playerRef = entityRef.getStore().getComponent(entityRef, PlayerRef.getComponentType());
+        if (playerRef == null) {
+            return;
+        }
+
+        cameraController.apply(playerRef.getPacketHandler());
+        enclaveManager.assignEnclaveToPlayer(player, playerRef.getUuid());
     }
 
     private void onPlayerDisconnect(PlayerDisconnectEvent event) {

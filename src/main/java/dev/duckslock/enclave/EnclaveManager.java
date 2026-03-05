@@ -96,8 +96,7 @@ public class EnclaveManager {
         }
     }
 
-    public void assignEnclaveToPlayer(Player player) {
-        UUID uuid = player.getUuid();
+    public void assignEnclaveToPlayer(Player player, UUID uuid) {
         String name = player.getDisplayName();
 
         for (Enclave enclave : enclaves) {
