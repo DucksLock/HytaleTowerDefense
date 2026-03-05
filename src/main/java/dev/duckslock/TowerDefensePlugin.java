@@ -28,8 +28,10 @@ public class TowerDefensePlugin extends JavaPlugin {
     protected void setup() {
         instance = this;
 
-        // register events — PlayerReadyEvent keyed by world name (String), disconnect is Void no key
+        // PlayerReadyEvent keyed by world name (KeyType = String)
         getEventRegistry().register(PlayerReadyEvent.class, EnclaveManager.WORLD_NAME, this::onPlayerReady);
+
+        // PlayerDisconnectEvent is Void-keyed, no world key
         getEventRegistry().register(PlayerDisconnectEvent.class, this::onPlayerDisconnect);
 
         getLogger().at(Level.INFO).log("Tower Defense plugin set up.");
@@ -50,8 +52,9 @@ public class TowerDefensePlugin extends JavaPlugin {
     private void onPlayerReady(PlayerReadyEvent event) {
         var player = event.getPlayer();
         if (player == null) return;
-        // send top-down camera then put player in enclave
-        cameraController.apply(event.getPlayerRef());
+        // getPlayerRef() is deprecated but only way to get PlayerRef from PlayerReadyEvent
+        //noinspection deprecation
+        cameraController.apply(player.getPlayerRef());
         enclaveManager.assignEnclaveToPlayer(player);
     }
 
