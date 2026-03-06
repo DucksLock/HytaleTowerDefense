@@ -27,7 +27,16 @@ public class EnemySpawner {
     private final List<Enemy> activeEnemies = new ArrayList<>();
 
     public Enemy spawn(EnemyType type, int enclaveIndex, Vector3f spawnPos) {
-        Enemy enemy = new Enemy(type, enclaveIndex, spawnPos);
+        return spawn(type, enclaveIndex, spawnPos, null);
+    }
+
+    public Enemy spawn(
+            EnemyType type,
+            int enclaveIndex,
+            Vector3f spawnPos,
+            EnemySpawnProfile profile
+    ) {
+        Enemy enemy = new Enemy(type, enclaveIndex, spawnPos, profile);
 
         World world = Universe.get().getWorld(EnclaveManager.WORLD_NAME);
         if (world == null) {
@@ -44,9 +53,9 @@ public class EnemySpawner {
     }
 
     private void spawnEntity(Enemy enemy, World world, Vector3f spawnPos) {
-        ModelAsset modelAsset = ModelAsset.getAssetMap().getAsset(enemy.getType().assetId);
+        ModelAsset modelAsset = ModelAsset.getAssetMap().getAsset(enemy.getAssetId());
         if (modelAsset == null) {
-            LOGGER.at(Level.WARNING).log("Model not found: %s", enemy.getType().assetId);
+            LOGGER.at(Level.WARNING).log("Model not found: %s", enemy.getAssetId());
             return;
         }
 

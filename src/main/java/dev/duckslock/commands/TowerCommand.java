@@ -53,14 +53,12 @@ public class TowerCommand extends CommandBase {
 
     private void handlePlace(CommandContext ctx, Enclave enclave, String[] tokens) {
         if (tokens.length < 4) {
-            ctx.sendMessage(Message.raw("[TD] Usage: /tdtower place <type> <worldX> <worldZ>"));
+            ctx.sendMessage(Message.raw("[TD] Usage: /tdtower place <type|wc3UnitId> <worldX> <worldZ>"));
             return;
         }
 
-        TowerType type;
-        try {
-            type = TowerType.valueOf(tokens[1].toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException ex) {
+        TowerType type = TowerType.parse(tokens[1]);
+        if (type == null) {
             ctx.sendMessage(Message.raw("[TD] Unknown tower type: " + tokens[1]));
             return;
         }
@@ -130,7 +128,7 @@ public class TowerCommand extends CommandBase {
     private void sendUsage(CommandContext ctx) {
         ctx.sendMessage(Message.raw("[TD] Usage:"));
         ctx.sendMessage(Message.raw("[TD] /tdtower status"));
-        ctx.sendMessage(Message.raw("[TD] /tdtower place <type> <worldX> <worldZ>"));
+        ctx.sendMessage(Message.raw("[TD] /tdtower place <type|wc3UnitId> <worldX> <worldZ>"));
         ctx.sendMessage(Message.raw("[TD] /tdtower sell <worldX> <worldZ>"));
         ctx.sendMessage(Message.raw("[TD] /tdtower upgrade <worldX> <worldZ> <A|B>"));
     }

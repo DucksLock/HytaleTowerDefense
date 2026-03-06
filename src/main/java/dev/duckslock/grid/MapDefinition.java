@@ -1,90 +1,105 @@
 package dev.duckslock.grid;
 
-/**
- * Static map data. JSON loading can replace this later.
- */
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 public class MapDefinition {
 
-    public static final MapDefinition MAP_1 = new MapDefinition(
-            "The Ruins",
-            new GridSquareData[]{
-                    new GridSquareData(6, 1, GridSquareType.PATH),
-                    new GridSquareData(7, 1, GridSquareType.PATH),
-                    new GridSquareData(8, 1, GridSquareType.PATH),
-                    new GridSquareData(8, 2, GridSquareType.PATH),
-                    new GridSquareData(8, 3, GridSquareType.PATH),
-                    new GridSquareData(7, 3, GridSquareType.PATH),
-                    new GridSquareData(6, 3, GridSquareType.PATH),
-                    new GridSquareData(5, 3, GridSquareType.PATH),
-                    new GridSquareData(4, 3, GridSquareType.PATH),
-                    new GridSquareData(3, 3, GridSquareType.PATH),
-                    new GridSquareData(2, 3, GridSquareType.PATH),
-                    new GridSquareData(1, 3, GridSquareType.PATH),
-                    new GridSquareData(1, 4, GridSquareType.PATH),
-                    new GridSquareData(1, 5, GridSquareType.PATH),
-                    new GridSquareData(1, 6, GridSquareType.PATH),
-                    new GridSquareData(2, 6, GridSquareType.PATH),
-                    new GridSquareData(3, 6, GridSquareType.PATH),
-                    new GridSquareData(4, 6, GridSquareType.PATH),
-                    new GridSquareData(5, 6, GridSquareType.PATH),
-                    new GridSquareData(6, 6, GridSquareType.PATH),
-                    new GridSquareData(7, 6, GridSquareType.PATH),
-                    new GridSquareData(8, 6, GridSquareType.PATH),
-                    new GridSquareData(8, 7, GridSquareType.PATH),
-                    new GridSquareData(8, 8, GridSquareType.PATH),
+    private static final Gson GSON = new GsonBuilder().create();
 
-                    new GridSquareData(1, 1, GridSquareType.BUILDABLE),
-                    new GridSquareData(2, 1, GridSquareType.BUILDABLE),
-                    new GridSquareData(3, 1, GridSquareType.BUILDABLE),
-                    new GridSquareData(4, 1, GridSquareType.BUILDABLE),
-                    new GridSquareData(5, 1, GridSquareType.BUILDABLE),
-                    new GridSquareData(1, 2, GridSquareType.BUILDABLE),
-                    new GridSquareData(2, 2, GridSquareType.BUILDABLE),
-                    new GridSquareData(3, 2, GridSquareType.BUILDABLE),
-                    new GridSquareData(4, 2, GridSquareType.BUILDABLE),
-                    new GridSquareData(5, 2, GridSquareType.BUILDABLE),
-                    new GridSquareData(2, 4, GridSquareType.BUILDABLE),
-                    new GridSquareData(3, 4, GridSquareType.BUILDABLE),
-                    new GridSquareData(4, 4, GridSquareType.BUILDABLE),
-                    new GridSquareData(5, 4, GridSquareType.BUILDABLE),
-                    new GridSquareData(6, 4, GridSquareType.BUILDABLE),
-                    new GridSquareData(7, 4, GridSquareType.BUILDABLE),
-                    new GridSquareData(2, 5, GridSquareType.BUILDABLE),
-                    new GridSquareData(3, 5, GridSquareType.BUILDABLE),
-                    new GridSquareData(4, 5, GridSquareType.BUILDABLE),
-                    new GridSquareData(5, 5, GridSquareType.BUILDABLE),
-                    new GridSquareData(6, 5, GridSquareType.BUILDABLE),
-                    new GridSquareData(7, 5, GridSquareType.BUILDABLE)
-            },
-            new int[][]{
-                    {8, 0},
-                    {8, 3},
-                    {1, 3},
-                    {1, 6},
-                    {8, 6},
-                    {8, 9}
+    private String name = "Unnamed";
+    private int gridWidth;
+    private int gridHeight;
+    private List<GridSquareData> squares = new ArrayList<>();
+    private List<GridWaypoint> waypoints = new ArrayList<>();
+
+    public static MapDefinition loadFromResource(String resourcePath) throws IOException {
+        try (InputStream stream = MapDefinition.class.getClassLoader().getResourceAsStream(resourcePath)) {
+            if (stream == null) {
+                throw new IOException("Map resource not found: " + resourcePath);
             }
-    );
 
-    private final String name;
-    private final GridSquareData[] squares;
-    private final int[][] waypoints;
+            try (InputStreamReader reader = new InputStreamReader(stream, StandardCharsets.UTF_8)) {
+                MapDefinition parsed = GSON.fromJson(reader, MapDefinition.class);
+                if (parsed == null) {
+                    throw new IOException("Map resource parsed to null: " + resourcePath);
+                }
+                parsed.sanitize();
+                return parsed;
+            }
+        }
+    }
 
-    public MapDefinition(String name, GridSquareData[] squares, int[][] waypoints) {
-        this.name = name;
-        this.squares = squares;
-        this.waypoints = waypoints;
+    private void sanitize() {
+        if (name == null || name.isBlank()) {
+            name = "Unnamed";
+        }
+        gridWidth = Math.max(1, gridWidth);
+        gridHeight = Math.max(1, gridHeight);
+
+        if (squares == null) {
+            squares = new ArrayList<>();
+        } else {
+            squares = new ArrayList<>(squares);
+        }
+
+        if (waypoints == null) {
+            waypoints = new ArrayList<>();
+        } else {
+            waypoints = new ArrayList<>(waypoints);
+        }
     }
 
     public String getName() {
         return name;
     }
 
-    public GridSquareData[] getSquares() {
-        return squares;
+    public int getGridWidth() {
+        return gridWidth;
     }
 
-    public int[][] getWaypoints() {
-        return waypoints;
+    public int getGridHeight() {
+        return gridHeight;
+    }
+
+    public List<GridSquareData> getSquares() {
+        return Collections.unmodifiableList(squares);
+    }
+
+    public List<GridWaypoint> getWaypoints() {
+        return Collections.unmodifiableList(waypoints);
+    }
+
+    public boolean hasWaypoints() {
+        return !waypoints.isEmpty();
+    }
+
+    public static final class GridWaypoint {
+        private int gridX;
+        private int gridZ;
+
+        public GridWaypoint() {
+        }
+
+        public GridWaypoint(int gridX, int gridZ) {
+            this.gridX = gridX;
+            this.gridZ = gridZ;
+        }
+
+        public int getGridX() {
+            return gridX;
+        }
+
+        public int getGridZ() {
+            return gridZ;
+        }
     }
 }

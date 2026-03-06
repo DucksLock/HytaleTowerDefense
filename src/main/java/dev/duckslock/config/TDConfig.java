@@ -1,6 +1,7 @@
 package dev.duckslock.config;
 
 import com.hypixel.hytale.logger.HytaleLogger;
+import dev.duckslock.combat.ElementType;
 import dev.duckslock.enemy.EnemyType;
 import dev.duckslock.tower.TowerType;
 
@@ -40,14 +41,14 @@ public final class TDConfig {
 
     public static Map<String, EnemyConfig> defaultEnemies() {
         Map<String, EnemyConfig> map = new LinkedHashMap<>();
-        map.put("GRUNT", new EnemyConfig("Zombie", 80, 1.0f, 0.00f, 5, 1, false));
-        map.put("RUNNER", new EnemyConfig("Skeleton_Scout", 50, 1.6f, 0.00f, 8, 1, false));
-        map.put("SOLDIER", new EnemyConfig("Skeleton_Soldier", 120, 1.1f, 0.15f, 10, 1, false));
-        map.put("BRUTE", new EnemyConfig("Trork_Unarmed", 200, 0.7f, 0.30f, 12, 2, false));
-        map.put("SHIELDED", new EnemyConfig("Trork_Mauler", 150, 1.0f, 0.50f, 15, 2, false));
-        map.put("HUNTER", new EnemyConfig("Outlander_Hunter", 130, 1.5f, 0.10f, 18, 1, false));
-        map.put("ELITE", new EnemyConfig("Outlander_Brute", 300, 0.9f, 0.40f, 25, 2, false));
-        map.put("GOLEM", new EnemyConfig("Earthen_Golem", 1500, 0.5f, 0.40f, 80, 5, true));
+        map.put("GRUNT", new EnemyConfig("Zombie", 80, 1.0f, 0.00f, 5, 1, false, ElementType.NONE.name()));
+        map.put("RUNNER", new EnemyConfig("Skeleton_Scout", 50, 1.6f, 0.00f, 8, 1, false, ElementType.NONE.name()));
+        map.put("SOLDIER", new EnemyConfig("Skeleton_Soldier", 120, 1.1f, 0.15f, 10, 1, false, ElementType.NONE.name()));
+        map.put("BRUTE", new EnemyConfig("Trork_Unarmed", 200, 0.7f, 0.30f, 12, 2, false, ElementType.NONE.name()));
+        map.put("SHIELDED", new EnemyConfig("Trork_Mauler", 150, 1.0f, 0.50f, 15, 2, false, ElementType.NONE.name()));
+        map.put("HUNTER", new EnemyConfig("Outlander_Hunter", 130, 1.5f, 0.10f, 18, 1, false, ElementType.NONE.name()));
+        map.put("ELITE", new EnemyConfig("Outlander_Brute", 300, 0.9f, 0.40f, 25, 2, false, ElementType.NONE.name()));
+        map.put("GOLEM", new EnemyConfig("Earthen_Golem", 1500, 0.5f, 0.40f, 80, 5, true, ElementType.EARTH.name()));
         return map;
     }
 
@@ -122,54 +123,9 @@ public final class TDConfig {
 
     public static Map<String, TowerConfig> defaultTowers() {
         Map<String, TowerConfig> map = new LinkedHashMap<>();
-        map.put("ARROW", new TowerConfig(
-                "Outlander_Hunter",
-                50,
-                15,
-                1.2,
-                6.0,
-                0.0,
-                0L,
-                false,
-                defaultPathAUpgrades(),
-                defaultPathBUpgrades()
-        ));
-        map.put("CANNON", new TowerConfig(
-                "Trork_Mauler",
-                80,
-                40,
-                0.5,
-                5.0,
-                0.0,
-                0L,
-                false,
-                defaultPathAUpgrades(),
-                defaultPathBUpgrades()
-        ));
-        map.put("FROST", new TowerConfig(
-                "Skeleton_Soldier",
-                65,
-                8,
-                1.0,
-                5.0,
-                0.25,
-                1500L,
-                false,
-                defaultPathAUpgrades(),
-                defaultPathBUpgrades()
-        ));
-        map.put("MAGIC", new TowerConfig(
-                "Outlander_Brute",
-                100,
-                25,
-                0.8,
-                6.0,
-                0.0,
-                0L,
-                true,
-                defaultPathAUpgrades(),
-                defaultPathBUpgrades()
-        ));
+        for (TowerType type : TowerType.values()) {
+            map.put(type.name(), type.defaultConfigCopy());
+        }
         return map;
     }
 
@@ -334,73 +290,6 @@ public final class TDConfig {
         public float planeNormalZ = 0.0f;
     }
 
-    public static final class GameplayConfig {
-        public int startingLives = 20;
-        public int startingGold = 150;
-        public int betweenWaveIncome = 10;
-        public long prepareCountdownMs = 5000L;
-        public long cleanupDurationMs = 1500L;
-        public long waveTickMs = 100L;
-    }
-
-    public static final class DebugRoundsConfig {
-        public boolean enabledByDefault = false;
-        public int activeRoundId = 1;
-        public boolean triggerOnlyOnNewAssignment = true;
-        public long movementTickMs = 100L;
-        public double baseMoveBlocksPerSecond = 2.6d;
-        public double waypointReachedDistance = 0.35d;
-        public long enemySpawnSpacingMs = 300L;
-        public long entityRefWaitTimeoutMs = 4000L;
-        public List<String> walkAnimationCandidates = defaultWalkAnimationCandidates();
-        public List<DebugRoundConfig> rounds = defaultDebugRounds();
-    }
-
-    public static final class SprintConfig {
-        public boolean enableSprintForceFeature = true;
-        public boolean applyDirectionalSprintFix = true;
-        public float backwardRunSpeedMultiplier = 0.0f;
-        public float strafeRunSpeedMultiplier = 0.0f;
-    }
-
-    public static final class EnemyConfig {
-        public String assetId;
-        public int maxHp;
-        public float speed;
-        public float armor;
-        public int bounty;
-        public int damage;
-        public boolean boss;
-
-        public EnemyConfig() {
-        }
-
-        public EnemyConfig(String assetId, int maxHp, float speed, float armor, int bounty, int damage, boolean boss) {
-            this.assetId = assetId;
-            this.maxHp = maxHp;
-            this.speed = speed;
-            this.armor = armor;
-            this.bounty = bounty;
-            this.damage = damage;
-            this.boss = boss;
-        }
-
-        public EnemyConfig copy() {
-            return new EnemyConfig(assetId, maxHp, speed, armor, bounty, damage, boss);
-        }
-
-        public void sanitize() {
-            if (isBlank(assetId)) {
-                assetId = "Zombie";
-            }
-            maxHp = positiveInt(maxHp, 1);
-            speed = speed > 0f ? speed : 1.0f;
-            armor = Math.max(0f, Math.min(0.95f, armor));
-            bounty = Math.max(0, bounty);
-            damage = Math.max(0, damage);
-        }
-    }
-
     public void sanitize(HytaleLogger logger) {
         if (world == null) {
             world = new WorldConfig();
@@ -443,12 +332,17 @@ public final class TDConfig {
         if (gameplay == null) {
             gameplay = new GameplayConfig();
         }
-        gameplay.startingLives = positiveInt(gameplay.startingLives, 20);
+        gameplay.startingLives = positiveInt(gameplay.startingLives, 50);
         gameplay.startingGold = Math.max(0, gameplay.startingGold);
         gameplay.betweenWaveIncome = Math.max(0, gameplay.betweenWaveIncome);
         gameplay.prepareCountdownMs = Math.max(0L, gameplay.prepareCountdownMs);
         gameplay.cleanupDurationMs = Math.max(0L, gameplay.cleanupDurationMs);
         gameplay.waveTickMs = Math.max(20L, gameplay.waveTickMs);
+        gameplay.interestIntervalMs = Math.max(1000L, gameplay.interestIntervalMs);
+        gameplay.baseInterestPercent = Math.max(0d, gameplay.baseInterestPercent);
+        gameplay.interestUpgradePercent = Math.max(0d, gameplay.interestUpgradePercent);
+        gameplay.wc3WaveDefaultCount = positiveInt(gameplay.wc3WaveDefaultCount, 30);
+        gameplay.wc3WavePeriodicCount = positiveInt(gameplay.wc3WavePeriodicCount, 15);
 
         if (debugRounds == null) {
             debugRounds = new DebugRoundsConfig();
@@ -505,7 +399,8 @@ public final class TDConfig {
         for (TowerType type : TowerType.values()) {
             TowerConfig config = configuredTowers.get(type.name());
             if (config == null) {
-                config = defaultTowers.get(type.name()).copy();
+                TowerConfig defaultsForType = defaultTowers.get(type.name());
+                config = defaultsForType != null ? defaultsForType.copy() : type.defaultConfigCopy();
             } else {
                 config = config.copy();
             }
@@ -513,6 +408,91 @@ public final class TDConfig {
             sanitizedTowers.put(type.name(), config);
         }
         towers = sanitizedTowers;
+    }
+
+    public static final class DebugRoundsConfig {
+        public boolean enabledByDefault = false;
+        public int activeRoundId = 1;
+        public boolean triggerOnlyOnNewAssignment = true;
+        public long movementTickMs = 100L;
+        public double baseMoveBlocksPerSecond = 2.6d;
+        public double waypointReachedDistance = 0.35d;
+        public long enemySpawnSpacingMs = 300L;
+        public long entityRefWaitTimeoutMs = 4000L;
+        public List<String> walkAnimationCandidates = defaultWalkAnimationCandidates();
+        public List<DebugRoundConfig> rounds = defaultDebugRounds();
+    }
+
+    public static final class SprintConfig {
+        public boolean enableSprintForceFeature = true;
+        public boolean applyDirectionalSprintFix = true;
+        public float backwardRunSpeedMultiplier = 0.0f;
+        public float strafeRunSpeedMultiplier = 0.0f;
+    }
+
+    public static final class GameplayConfig {
+        public int startingLives = 50;
+        public int startingGold = 150;
+        public int betweenWaveIncome = 10;
+        public long prepareCountdownMs = 5000L;
+        public long cleanupDurationMs = 1500L;
+        public long waveTickMs = 100L;
+        public long interestIntervalMs = 15000L;
+        public double baseInterestPercent = 2.0d;
+        public double interestUpgradePercent = 0.6d;
+        public boolean useWc3ReferenceWaves = true;
+        public int wc3WaveDefaultCount = 30;
+        public int wc3WavePeriodicCount = 15;
+    }
+
+    public static final class EnemyConfig {
+        public String assetId;
+        public int maxHp;
+        public float speed;
+        public float armor;
+        public int bounty;
+        public int damage;
+        public boolean boss;
+        public String element = ElementType.NONE.name();
+
+        public EnemyConfig() {
+        }
+
+        public EnemyConfig(
+                String assetId,
+                int maxHp,
+                float speed,
+                float armor,
+                int bounty,
+                int damage,
+                boolean boss,
+                String element
+        ) {
+            this.assetId = assetId;
+            this.maxHp = maxHp;
+            this.speed = speed;
+            this.armor = armor;
+            this.bounty = bounty;
+            this.damage = damage;
+            this.boss = boss;
+            this.element = element;
+        }
+
+        public EnemyConfig copy() {
+            return new EnemyConfig(assetId, maxHp, speed, armor, bounty, damage, boss, element);
+        }
+
+        public void sanitize() {
+            if (isBlank(assetId)) {
+                assetId = "Zombie";
+            }
+            maxHp = positiveInt(maxHp, 1);
+            speed = speed > 0f ? speed : 1.0f;
+            armor = Math.max(0f, Math.min(0.95f, armor));
+            bounty = Math.max(0, bounty);
+            damage = Math.max(0, damage);
+            element = ElementType.parseOrDefault(element, ElementType.NONE).name();
+        }
     }
 
     public static final class TowerConfig {
@@ -524,6 +504,7 @@ public final class TDConfig {
         public double slowPercent;
         public long slowDurationMs;
         public boolean ignoreArmor;
+        public String damageElement = ElementType.COMPOSITE.name();
         public List<UpgradeTierConfig> pathA = defaultPathAUpgrades();
         public List<UpgradeTierConfig> pathB = defaultPathBUpgrades();
 
@@ -539,6 +520,7 @@ public final class TDConfig {
                 double slowPercent,
                 long slowDurationMs,
                 boolean ignoreArmor,
+                String damageElement,
                 List<UpgradeTierConfig> pathA,
                 List<UpgradeTierConfig> pathB
         ) {
@@ -550,6 +532,7 @@ public final class TDConfig {
             this.slowPercent = slowPercent;
             this.slowDurationMs = slowDurationMs;
             this.ignoreArmor = ignoreArmor;
+            this.damageElement = damageElement;
             this.pathA = new ArrayList<>(pathA);
             this.pathB = new ArrayList<>(pathB);
         }
@@ -564,6 +547,7 @@ public final class TDConfig {
                     slowPercent,
                     slowDurationMs,
                     ignoreArmor,
+                    damageElement,
                     pathA == null ? List.of() : pathA,
                     pathB == null ? List.of() : pathB
             );
@@ -579,6 +563,7 @@ public final class TDConfig {
             range = positiveDouble(range, 1.0d);
             slowPercent = Math.max(0d, Math.min(0.95d, slowPercent));
             slowDurationMs = Math.max(0L, slowDurationMs);
+            damageElement = ElementType.parseOrDefault(damageElement, ElementType.COMPOSITE).name();
             pathA = sanitizeUpgradePath(pathA, defaultPathAUpgrades());
             pathB = sanitizeUpgradePath(pathB, defaultPathBUpgrades());
         }

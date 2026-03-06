@@ -21,6 +21,8 @@ import dev.duckslock.enclave.EnclaveManager;
 import dev.duckslock.enemy.Enemy;
 import dev.duckslock.enemy.EnemySpawner;
 import dev.duckslock.grid.ArenaConstants;
+import dev.duckslock.grid.MapDefinition;
+import dev.duckslock.grid.MapRegistry;
 import dev.duckslock.wave.WaveManager;
 
 import javax.annotation.Nullable;
@@ -43,6 +45,7 @@ public class ArenaDebugRoundService {
     private final long enemySpawnSpacingMs;
     private final long entityRefWaitTimeoutMs;
     private final String[] walkAnimationCandidates;
+    private final MapRegistry mapRegistry;
     private final Map<UUID, TrackedEnemy> trackedEnemies = new ConcurrentHashMap<>();
     private final ScheduledExecutorService scheduler =
             Executors.newSingleThreadScheduledExecutor(r -> {
@@ -51,7 +54,7 @@ public class ArenaDebugRoundService {
                 return t;
             });
 
-    public ArenaDebugRoundService(EnclaveManager enclaveManager) {
+    public ArenaDebugRoundService(EnclaveManager enclaveManager, MapRegistry mapRegistry) {
         TDConfig.DebugRoundsConfig config = ModConfigHolder.get().debugRounds;
         this.movementTickMs = config.movementTickMs;
         this.baseMoveBlocksPerSecond = config.baseMoveBlocksPerSecond;
@@ -59,6 +62,7 @@ public class ArenaDebugRoundService {
         this.enemySpawnSpacingMs = config.enemySpawnSpacingMs;
         this.entityRefWaitTimeoutMs = config.entityRefWaitTimeoutMs;
         this.walkAnimationCandidates = config.walkAnimationCandidates.toArray(new String[0]);
+        this.mapRegistry = mapRegistry;
     }
 
     public void start() {
@@ -78,7 +82,7 @@ public class ArenaDebugRoundService {
             return false;
         }
 
-        List<Vector3d> worldWaypoints = toWorldWaypoints(enclave, round.getLocalWaypoints());
+        List<Vector3d> worldWaypoints = resolveWorldWaypoints(enclave, round);
         if (worldWaypoints.size() < 2) {
             LOGGER.at(Level.WARNING).log("Round %s has fewer than 2 waypoints; not spawning.", round.getName());
             return false;
@@ -155,7 +159,7 @@ public class ArenaDebugRoundService {
     ) {
         Vector3d start = worldWaypoints.get(0);
         Vector3f spawnPos = new Vector3f((float) start.x, (float) start.y, (float) start.z);
-        Enemy enemy = enemySpawner.spawn(batch.getEnemyType(), enclave.getIndex(), spawnPos);
+        Enemy enemy = enemySpawner.spawn(batch.getEnemyType(), enclave.getIndex(), spawnPos, batch.getProfile());
 
         trackedEnemies.put(
                 enemy.getId(),
@@ -227,7 +231,7 @@ public class ArenaDebugRoundService {
         }
 
         if (tracked.nextWaypointIndex >= tracked.worldWaypoints.size()) {
-            resolveLeakedEnemy(tracked);
+            handleLeakedEnemy(store, tracked);
             return;
         }
 
@@ -242,7 +246,7 @@ public class ArenaDebugRoundService {
         if (distance <= waypointReachedDistance) {
             tracked.nextWaypointIndex++;
             if (tracked.nextWaypointIndex >= tracked.worldWaypoints.size()) {
-                resolveLeakedEnemy(tracked);
+                handleLeakedEnemy(store, tracked);
                 return;
             }
 
@@ -261,7 +265,7 @@ public class ArenaDebugRoundService {
 
         tracked.enemy.setDistanceToNextWaypoint(distance);
         double maxStep = baseMoveBlocksPerSecond
-                * tracked.enemy.getType().speed
+                * tracked.enemy.getSpeedMultiplier()
                 * tracked.enemy.getCurrentSpeedMultiplier(nowMs)
                 * (movementTickMs / 1000.0d);
         double step = Math.min(distance, maxStep);
@@ -284,7 +288,7 @@ public class ArenaDebugRoundService {
         }
         enemySpawner.remove(tracked.enemy);
 
-        int bounty = tracked.enemy.getType().getBounty();
+        int bounty = tracked.enemy.getBounty();
         if (tracked.waveManager.isEarlyWaveTriggered()) {
             bounty = Math.max(1, Math.round(bounty * 1.1f));
         }
@@ -292,15 +296,47 @@ public class ArenaDebugRoundService {
         tracked.waveManager.onEnemyResolved();
     }
 
-    private void resolveLeakedEnemy(TrackedEnemy tracked) {
-        trackedEnemies.remove(tracked.enemy.getId());
-        enemySpawner.remove(tracked.enemy);
-
-        boolean defeated = tracked.enclave.deductLives(tracked.enemy.getType().getDamage());
-        tracked.waveManager.onEnemyResolved();
+    private void handleLeakedEnemy(Store<EntityStore> store, TrackedEnemy tracked) {
+        // WC3 behavior: leaked creeps loop back to start and keep trying; each leak costs 1 life.
+        boolean defeated = tracked.enclave.deductLives(tracked.enemy.getLeakDamage());
         if (defeated) {
+            trackedEnemies.remove(tracked.enemy.getId());
+            enemySpawner.remove(tracked.enemy);
+            tracked.waveManager.onEnemyResolved();
             tracked.waveManager.onEnclaveDefeated();
+            return;
         }
+
+        if (tracked.worldWaypoints.size() < 2) {
+            trackedEnemies.remove(tracked.enemy.getId());
+            enemySpawner.remove(tracked.enemy);
+            tracked.waveManager.onEnemyResolved();
+            return;
+        }
+
+        Vector3d start = tracked.worldWaypoints.get(0);
+        tracked.nextWaypointIndex = 1;
+        tracked.enemy.resetPathProgress();
+        tracked.enemy.clearTemporaryEffects();
+        tracked.enemy.setPosition(start.toVector3f());
+
+        Ref<EntityStore> ref = tracked.enemy.getEntityRef();
+        if (ref == null || !ref.isValid()) {
+            return;
+        }
+
+        TransformComponent transform = store.getComponent(ref, TransformComponent.getComponentType());
+        if (transform == null) {
+            return;
+        }
+
+        Vector3d nextWaypoint = tracked.worldWaypoints.get(tracked.nextWaypointIndex);
+        double dx = nextWaypoint.x - start.x;
+        double dz = nextWaypoint.z - start.z;
+
+        transform.teleportPosition(start);
+        transform.teleportRotation(toYawRotation(dx, dz));
+        setWalkingMovementState(store, ref);
     }
 
     private void resolveInvalidEnemy(TrackedEnemy tracked) {
@@ -376,6 +412,34 @@ public class ArenaDebugRoundService {
                     enclave.getWorldStartX() + local.x,
                     ArenaConstants.ARENA_FLOOR_Y + local.y,
                     enclave.getWorldStartZ() + local.z
+            ));
+        }
+        return world;
+    }
+
+    private List<Vector3d> resolveWorldWaypoints(Enclave enclave, DebugRoundDefinition round) {
+        MapDefinition activeMap = mapRegistry.getActiveMap();
+        if (activeMap != null && activeMap.hasWaypoints()) {
+            List<Vector3d> mapWaypoints = toWorldWaypoints(activeMap.getWaypoints());
+            if (mapWaypoints.size() >= 2) {
+                return mapWaypoints;
+            }
+        }
+        return toWorldWaypoints(enclave, round.getLocalWaypoints());
+    }
+
+    private List<Vector3d> toWorldWaypoints(List<MapDefinition.GridWaypoint> mapWaypoints) {
+        List<Vector3d> world = new ArrayList<>(mapWaypoints.size());
+        double squareSize = ArenaConstants.SQUARE_SIZE;
+        double centerOffset = squareSize / 2.0d;
+        for (MapDefinition.GridWaypoint waypoint : mapWaypoints) {
+            if (waypoint == null) {
+                continue;
+            }
+            world.add(new Vector3d(
+                    ArenaConstants.ARENA_ORIGIN_X + waypoint.getGridX() * squareSize + centerOffset,
+                    ArenaConstants.ARENA_FLOOR_Y + 1.0d,
+                    ArenaConstants.ARENA_ORIGIN_Z + waypoint.getGridZ() * squareSize + centerOffset
             ));
         }
         return world;

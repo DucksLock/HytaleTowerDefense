@@ -2,11 +2,14 @@ package dev.duckslock.tower;
 
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+import dev.duckslock.combat.ElementType;
 import dev.duckslock.enclave.Enclave;
 import dev.duckslock.enemy.Enemy;
+import dev.duckslock.grid.ArenaConstants;
 import dev.duckslock.grid.GridSquare;
 
 import javax.annotation.Nullable;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
@@ -16,6 +19,7 @@ public class Tower {
     private final UUID id = UUID.randomUUID();
     private final TowerType type;
     private final GridSquare square;
+    private final List<GridSquare> occupiedSquares;
     private final Enclave enclave;
     private final long createdAtMs = System.currentTimeMillis();
 
@@ -26,6 +30,9 @@ public class Tower {
     private double attackSpeedMultiplier = 1.0d;
     private double slowPercentMultiplier = 1.0d;
     private long slowDurationBonusMs = 0L;
+    private double externalDamageMultiplier = 1.0d;
+    private boolean supportBuffApplied = false;
+    private boolean trickeryBuffed = false;
 
     @Nullable
     private UpgradePath chosenPath;
@@ -39,9 +46,10 @@ public class Tower {
     @Nullable
     private Enemy currentTarget;
 
-    public Tower(TowerType type, GridSquare square, Enclave enclave) {
+    public Tower(TowerType type, GridSquare square, List<GridSquare> occupiedSquares, Enclave enclave) {
         this.type = type;
         this.square = square;
+        this.occupiedSquares = List.copyOf(occupiedSquares);
         this.enclave = enclave;
         this.lastAttackTick = createdAtMs;
     }
@@ -81,7 +89,7 @@ public class Tower {
     }
 
     public int getEffectiveDamage() {
-        return Math.max(1, (int) Math.round(type.getDamage() * damageMultiplier));
+        return Math.max(1, (int) Math.round(type.getDamage() * damageMultiplier * externalDamageMultiplier));
     }
 
     public double getEffectiveRange() {
@@ -90,6 +98,66 @@ public class Tower {
 
     public double getEffectiveAttackSpeed() {
         return Math.max(0.05d, type.getAttackSpeed() * attackSpeedMultiplier);
+    }
+
+    public void applyExternalDamageMultiplier(double multiplier) {
+        if (multiplier <= 0.0d) {
+            return;
+        }
+        externalDamageMultiplier *= multiplier;
+    }
+
+    public boolean isSupportBuffApplied() {
+        return supportBuffApplied;
+    }
+
+    public void markSupportBuffApplied() {
+        supportBuffApplied = true;
+    }
+
+    public boolean isTrickeryBuffed() {
+        return trickeryBuffed;
+    }
+
+    public void markTrickeryBuffed() {
+        trickeryBuffed = true;
+    }
+
+    public ElementType getDamageElement() {
+        return type.getDamageElement();
+    }
+
+    public TowerAttackKind getAttackKind() {
+        return type.getAttackKind();
+    }
+
+    public double getEffectiveSplashRadius() {
+        return type.getSplashRadius() * rangeMultiplier;
+    }
+
+    public double getSplashFalloff() {
+        return type.getSplashFalloff();
+    }
+
+    public int getChainBounces() {
+        return type.getChainBounces();
+    }
+
+    public double getEffectiveChainRange() {
+        return type.getChainRange() * rangeMultiplier;
+    }
+
+    public double getChainFalloff() {
+        return type.getChainFalloff();
+    }
+
+    public double getCenterWorldX() {
+        // Towers occupy 2x2 grid squares to match WC3 footprint.
+        return square.getWorldX() + ArenaConstants.SQUARE_SIZE;
+    }
+
+    public double getCenterWorldZ() {
+        return square.getWorldZ() + ArenaConstants.SQUARE_SIZE;
     }
 
     public double getEffectiveSlowPercent() {
@@ -148,6 +216,10 @@ public class Tower {
 
     public GridSquare getSquare() {
         return square;
+    }
+
+    public List<GridSquare> getOccupiedSquares() {
+        return occupiedSquares;
     }
 
     public Enclave getEnclave() {

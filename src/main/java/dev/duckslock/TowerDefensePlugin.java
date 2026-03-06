@@ -22,9 +22,12 @@ import dev.duckslock.enclave.EnclaveManager;
 import dev.duckslock.enemy.EnemyType;
 import dev.duckslock.game.GameManager;
 import dev.duckslock.grid.ArenaConstants;
+import dev.duckslock.grid.MapDefinition;
+import dev.duckslock.grid.MapRegistry;
 import dev.duckslock.sprint.SprintMechanicController;
 import dev.duckslock.tower.TowerType;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
@@ -40,6 +43,7 @@ public class TowerDefensePlugin extends JavaPlugin {
     private GameManager gameManager;
     private final TDCameraController cameraController = new TDCameraController();
     private TDConfig config;
+    private MapRegistry mapRegistry;
 
     public TowerDefensePlugin(JavaPluginInit init) {
         super(init);
@@ -61,6 +65,7 @@ public class TowerDefensePlugin extends JavaPlugin {
         TowerType.applyConfig(config.towers, getLogger());
         DebugRoundDefinitions.replaceFromConfig(config.debugRounds.rounds);
         SprintMechanicController.enable(this);
+        mapRegistry = loadMaps();
 
         getEventRegistry().register(PrepareUniverseEvent.class, this::onPrepareUniverse);
         getEventRegistry().register(PlayerReadyEvent.class, EnclaveManager.WORLD_NAME, this::onPlayerReady);
@@ -71,9 +76,9 @@ public class TowerDefensePlugin extends JavaPlugin {
 
     @Override
     protected void start() {
-        enclaveManager = new EnclaveManager();
+        enclaveManager = new EnclaveManager(mapRegistry);
         enclaveManager.beginWorldBootstrap();
-        debugRoundService = new ArenaDebugRoundService(enclaveManager);
+        debugRoundService = new ArenaDebugRoundService(enclaveManager, mapRegistry);
         debugRoundService.start();
         gameManager = new GameManager(enclaveManager, debugRoundService);
         gameManager.start();
@@ -121,6 +126,28 @@ public class TowerDefensePlugin extends JavaPlugin {
 
     public EnclaveManager getEnclaveManager() {
         return enclaveManager;
+    }
+
+    public MapRegistry getMapRegistry() {
+        return mapRegistry;
+    }
+
+    private MapRegistry loadMaps() {
+        MapRegistry registry = new MapRegistry();
+        try {
+            MapDefinition elementTd = MapDefinition.loadFromResource("maps/ElementTD.json");
+            registry.register("element_td", elementTd);
+            registry.setActiveMap("element_td");
+            getLogger().at(Level.INFO).log(
+                    "Loaded map '%s' (%sx%s) from maps/ElementTD.json.",
+                    elementTd.getName(),
+                    elementTd.getGridWidth(),
+                    elementTd.getGridHeight()
+            );
+            return registry;
+        } catch (IOException ex) {
+            throw new IllegalStateException("Failed to load required map resource maps/ElementTD.json", ex);
+        }
     }
 
     private void onPrepareUniverse(PrepareUniverseEvent event) {

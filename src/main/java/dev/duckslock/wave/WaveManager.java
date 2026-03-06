@@ -1,8 +1,11 @@
 package dev.duckslock.wave;
 
+import dev.duckslock.combat.ElementType;
 import dev.duckslock.commands.ArenaDebugRoundService;
 import dev.duckslock.commands.DebugRoundDefinition;
 import dev.duckslock.enclave.Enclave;
+import dev.duckslock.enemy.EnemySpawnProfile;
+import dev.duckslock.enemy.EnemyType;
 
 import javax.annotation.Nullable;
 import java.util.List;
@@ -21,6 +24,10 @@ public class WaveManager {
     private int currentWaveNumber = 0;
     private int activeEnemyCount = 0;
     private boolean earlyWaveTriggered = false;
+    private boolean freeElementPickGranted = false;
+    private boolean pendingElementBoss = false;
+    private boolean activeBossWave = false;
+    private boolean rewardElementPickOnCleanup = false;
     private long stateDeadlineMs = 0L;
     @Nullable
     private DebugRoundDefinition activeRound;
@@ -53,7 +60,23 @@ public class WaveManager {
                 stateDeadlineMs = 0L;
             } else if (state == State.CLEANUP && nowMs >= stateDeadlineMs) {
                 enclave.addGold(betweenWaveIncome);
-                currentWaveNumber++;
+                if (activeBossWave) {
+                    activeBossWave = false;
+                    if (rewardElementPickOnCleanup) {
+                        enclave.addElementPickToken();
+                        rewardElementPickOnCleanup = false;
+                    }
+                } else {
+                    currentWaveNumber++;
+                    if (currentWaveNumber > 0 && currentWaveNumber % 5 == 0) {
+                        if (!freeElementPickGranted) {
+                            freeElementPickGranted = true;
+                            enclave.addElementPickToken();
+                        } else {
+                            pendingElementBoss = true;
+                        }
+                    }
+                }
                 state = State.IDLE;
                 stateDeadlineMs = 0L;
                 activeEnemyCount = 0;
@@ -68,17 +91,25 @@ public class WaveManager {
     }
 
     public boolean startNextWave() {
-        DebugRoundDefinition nextRound = resolveNextRound();
-        if (nextRound == null) {
-            return false;
-        }
-
         synchronized (this) {
             if (state != State.IDLE) {
                 return false;
             }
 
-            activeRound = nextRound;
+            DebugRoundDefinition nextRound = resolveNextRound();
+            if (nextRound == null) {
+                return false;
+            }
+
+            if (pendingElementBoss) {
+                activeRound = createElementBossRound(nextRound);
+                pendingElementBoss = false;
+                activeBossWave = true;
+                rewardElementPickOnCleanup = true;
+            } else {
+                activeRound = nextRound;
+                activeBossWave = false;
+            }
             activeEnemyCount = 0;
             earlyWaveTriggered = false;
             state = State.PREPARE;
@@ -123,6 +154,7 @@ public class WaveManager {
             earlyWaveTriggered = false;
             state = State.SPAWNING;
             stateDeadlineMs = 0L;
+            activeBossWave = false;
         }
 
         if (!debugRoundService.startDebugRound(enclave, round, this)) {
@@ -174,6 +206,9 @@ public class WaveManager {
         activeEnemyCount = 0;
         earlyWaveTriggered = false;
         activeRound = null;
+        pendingElementBoss = false;
+        activeBossWave = false;
+        rewardElementPickOnCleanup = false;
     }
 
     public synchronized int getCurrentWaveNumber() {
@@ -210,6 +245,25 @@ public class WaveManager {
     private void enterCleanup() {
         state = State.CLEANUP;
         stateDeadlineMs = System.currentTimeMillis() + cleanupDurationMs;
+    }
+
+    private DebugRoundDefinition createElementBossRound(DebugRoundDefinition template) {
+        EnemySpawnProfile elementalBossProfile = new EnemySpawnProfile(
+                "ELEMENT_BOSS",
+                null,
+                EnemyType.GOLEM.maxHp,
+                EnemyType.GOLEM.speed,
+                EnemyType.GOLEM.armor,
+                EnemyType.GOLEM.bounty,
+                3,
+                true,
+                ElementType.EARTH
+        );
+        return new DebugRoundDefinition(
+                "Elemental Boss",
+                template.getLocalWaypoints(),
+                List.of(new DebugRoundDefinition.SpawnBatch(0L, EnemyType.GOLEM, 1, elementalBossProfile))
+        );
     }
 
     public enum State {

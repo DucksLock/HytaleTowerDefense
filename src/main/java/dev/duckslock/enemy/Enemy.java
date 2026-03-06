@@ -3,6 +3,7 @@ package dev.duckslock.enemy;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.math.vector.Vector3f;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+import dev.duckslock.combat.ElementType;
 
 import javax.annotation.Nullable;
 import java.util.UUID;
@@ -13,6 +14,15 @@ public class Enemy {
     private final UUID id = UUID.randomUUID();
     private final EnemyType type;
     private final int enclaveIndex;
+    private final String assetId;
+    private final float speed;
+    private final float armor;
+    private final int bounty;
+    private final int leakDamage;
+    private final boolean boss;
+    private final ElementType element;
+    @Nullable
+    private final String sourceUnitId;
 
     private int hp;
     private int waypointIndex = 0;
@@ -24,10 +34,18 @@ public class Enemy {
     @Nullable
     private Ref<EntityStore> entityRef;
 
-    public Enemy(EnemyType type, int enclaveIndex, Vector3f spawnPos) {
+    public Enemy(EnemyType type, int enclaveIndex, Vector3f spawnPos, @Nullable EnemySpawnProfile profile) {
         this.type = type;
         this.enclaveIndex = enclaveIndex;
-        this.hp = type.maxHp;
+        this.assetId = resolveAssetId(type, profile);
+        this.speed = resolveSpeed(type, profile);
+        this.armor = resolveArmor(type, profile);
+        this.bounty = resolveBounty(type, profile);
+        this.leakDamage = resolveLeakDamage(type, profile);
+        this.boss = resolveBoss(type, profile);
+        this.element = resolveElement(type, profile);
+        this.sourceUnitId = profile == null ? null : profile.getSourceUnitId();
+        this.hp = resolveMaxHp(type, profile);
         this.position = spawnPos;
     }
 
@@ -47,6 +65,14 @@ public class Enemy {
 
     public EnemyType getType() {
         return type;
+    }
+
+    public String getAssetId() {
+        return assetId;
+    }
+
+    public float getSpeedMultiplier() {
+        return speed;
     }
 
     public int getEnclaveIndex() {
@@ -86,7 +112,7 @@ public class Enemy {
     }
 
     public double getArmorFraction() {
-        return Math.max(0d, Math.min(0.95d, type.armor));
+        return Math.max(0d, Math.min(0.95d, armor));
     }
 
     public void applySlow(double slowPercent, long durationMs, long nowMs) {
@@ -109,6 +135,37 @@ public class Enemy {
         return Math.max(0.05d, 1.0d - slowPercent);
     }
 
+    public void resetPathProgress() {
+        waypointIndex = 0;
+        distanceToNextWaypoint = Double.MAX_VALUE;
+    }
+
+    public void clearTemporaryEffects() {
+        slowUntilMs = 0L;
+        slowPercent = 0d;
+    }
+
+    public int getBounty() {
+        return bounty;
+    }
+
+    public int getLeakDamage() {
+        return leakDamage;
+    }
+
+    public boolean isBoss() {
+        return boss;
+    }
+
+    public ElementType getElement() {
+        return element;
+    }
+
+    @Nullable
+    public String getSourceUnitId() {
+        return sourceUnitId;
+    }
+
     @Nullable
     public Ref<EntityStore> getEntityRef() {
         return entityRef;
@@ -116,5 +173,61 @@ public class Enemy {
 
     public void setEntityRef(Ref<EntityStore> ref) {
         this.entityRef = ref;
+    }
+
+    private String resolveAssetId(EnemyType type, @Nullable EnemySpawnProfile profile) {
+        if (profile != null && profile.getAssetId() != null && !profile.getAssetId().isBlank()) {
+            return profile.getAssetId();
+        }
+        return type.assetId;
+    }
+
+    private int resolveMaxHp(EnemyType type, @Nullable EnemySpawnProfile profile) {
+        if (profile != null && profile.getMaxHp() != null) {
+            return Math.max(1, profile.getMaxHp());
+        }
+        return type.maxHp;
+    }
+
+    private float resolveSpeed(EnemyType type, @Nullable EnemySpawnProfile profile) {
+        if (profile != null && profile.getSpeed() != null) {
+            return Math.max(0.05f, profile.getSpeed());
+        }
+        return type.speed;
+    }
+
+    private float resolveArmor(EnemyType type, @Nullable EnemySpawnProfile profile) {
+        if (profile != null && profile.getArmor() != null) {
+            return Math.max(0f, Math.min(0.95f, profile.getArmor()));
+        }
+        return type.armor;
+    }
+
+    private int resolveBounty(EnemyType type, @Nullable EnemySpawnProfile profile) {
+        if (profile != null && profile.getBounty() != null) {
+            return Math.max(0, profile.getBounty());
+        }
+        return type.bounty;
+    }
+
+    private int resolveLeakDamage(EnemyType type, @Nullable EnemySpawnProfile profile) {
+        if (profile != null && profile.getLeakDamage() != null) {
+            return Math.max(1, profile.getLeakDamage());
+        }
+        return Math.max(1, type.damage);
+    }
+
+    private boolean resolveBoss(EnemyType type, @Nullable EnemySpawnProfile profile) {
+        if (profile != null && profile.getBoss() != null) {
+            return profile.getBoss();
+        }
+        return type.isBoss;
+    }
+
+    private ElementType resolveElement(EnemyType type, @Nullable EnemySpawnProfile profile) {
+        if (profile != null && profile.getElement() != null) {
+            return profile.getElement();
+        }
+        return type.getElement();
     }
 }

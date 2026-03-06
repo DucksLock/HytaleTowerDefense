@@ -17,9 +17,7 @@ import com.hypixel.hytale.server.core.universe.world.chunk.WorldChunk;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import dev.duckslock.config.ModConfigHolder;
 import dev.duckslock.config.TDConfig;
-import dev.duckslock.grid.ArenaConstants;
-import dev.duckslock.grid.GridSquare;
-import dev.duckslock.grid.GridSquareType;
+import dev.duckslock.grid.*;
 
 import javax.annotation.Nullable;
 import java.io.IOException;
@@ -39,6 +37,8 @@ public class EnclaveManager {
     public static String WORLD_NAME = "default";
     private static final HytaleLogger LOGGER = HytaleLogger.forEnclosingClass();
 
+    private final MapRegistry mapRegistry;
+    private final GridManager gridManager;
     private final Enclave[] enclaves = new Enclave[ArenaConstants.ENCLAVE_COUNT];
     private final String arenaMarkerFile;
     private final int preloadMarginChunks;
@@ -57,7 +57,11 @@ public class EnclaveManager {
     @Nullable
     private EnclaveAssignmentListener assignmentListener;
 
-    public EnclaveManager() {
+    public EnclaveManager(MapRegistry mapRegistry) {
+        this.mapRegistry = Objects.requireNonNull(mapRegistry, "mapRegistry");
+        MapDefinition activeMap = requireActiveMap();
+        this.gridManager = new GridManager(activeMap);
+
         TDConfig.WorldConfig worldConfig = ModConfigHolder.get().world;
         TDConfig.GameplayConfig gameplayConfig = ModConfigHolder.get().gameplay;
         this.arenaMarkerFile = worldConfig.arenaMarkerFile;
@@ -69,7 +73,9 @@ public class EnclaveManager {
                     i,
                     EnclaveColor.fromIndex(i),
                     gameplayConfig.startingLives,
-                    gameplayConfig.startingGold
+                    gameplayConfig.startingGold,
+                    gameplayConfig.baseInterestPercent,
+                    activeMap
             );
         }
 
@@ -100,57 +106,48 @@ public class EnclaveManager {
     private void generateArena(World world) {
         LOGGER.at(Level.INFO).log("Generating arena at Y=%s...", ArenaConstants.ARENA_FLOOR_Y);
 
-        int originX = ArenaConstants.ARENA_ORIGIN_X;
-        int originZ = ArenaConstants.ARENA_ORIGIN_Z;
         int floorY = ArenaConstants.ARENA_FLOOR_Y;
-        int width = ArenaConstants.totalArenaWidth();
-        int depth = ArenaConstants.totalArenaDepth();
+        MapDefinition map = requireActiveMap();
+        gridManager.loadMap(map);
 
-        for (int x = originX; x < originX + width; x++) {
-            for (int z = originZ; z < originZ + depth; z++) {
-                placeBlock(world, x, floorY, z, ArenaConstants.BLOCK_PATH);
+        int width = map.getGridWidth() * ArenaConstants.SQUARE_SIZE;
+        int depth = map.getGridHeight() * ArenaConstants.SQUARE_SIZE;
+
+        for (GridSquareData squareData : map.getSquares()) {
+            GridSquareType squareType = squareData.getType() == null
+                    ? GridSquareType.BLOCKED
+                    : squareData.getType();
+            if (squareType == GridSquareType.BLOCKED) {
+                continue;
             }
-        }
 
-        for (Enclave enclave : enclaves) {
-            generateEnclaveBlocks(world, enclave, floorY);
-        }
+            String blockType = switch (squareType) {
+                case PATH -> ArenaConstants.BLOCK_PATH;
+                case BUILDABLE -> ArenaConstants.BLOCK_BUILDABLE;
+                case BASE -> ArenaConstants.BLOCK_BASE;
+                case BLOCKED -> null;
+            };
 
-        LOGGER.at(Level.INFO).log("Arena generation complete: %s x %s blocks.", width, depth);
-    }
-
-    private void generateEnclaveBlocks(World world, Enclave enclave, int floorY) {
-        int column = enclave.getIndex() % ArenaConstants.ENCLAVES_PER_ROW;
-        int row = enclave.getIndex() / ArenaConstants.ENCLAVES_PER_ROW;
-        int borderX = ArenaConstants.enclaveWorldStartX(column);
-        int borderZ = ArenaConstants.enclaveWorldStartZ(row);
-        int borderSize = ArenaConstants.ENCLAVE_WORLD_SIZE;
-
-        for (int x = borderX; x < borderX + borderSize; x++) {
-            for (int z = borderZ; z < borderZ + borderSize; z++) {
-                boolean onBorder = x == borderX
-                        || x == borderX + borderSize - 1
-                        || z == borderZ
-                        || z == borderZ + borderSize - 1;
-
-                if (onBorder) {
-                    placeBlock(world, x, floorY, z, ArenaConstants.BLOCK_BORDER);
-                }
+            if (blockType == null) {
+                continue;
             }
-        }
 
-        int squareSize = ArenaConstants.SQUARE_SIZE;
-        for (GridSquare square : enclave.getAllSquares()) {
-            String blockType = square.getType() == GridSquareType.BASE
-                    ? ArenaConstants.BLOCK_BASE
-                    : ArenaConstants.BLOCK_BUILDABLE;
-
+            int worldStartX = ArenaConstants.ARENA_ORIGIN_X + squareData.getGridX() * ArenaConstants.SQUARE_SIZE;
+            int worldStartZ = ArenaConstants.ARENA_ORIGIN_Z + squareData.getGridZ() * ArenaConstants.SQUARE_SIZE;
+            int squareSize = ArenaConstants.SQUARE_SIZE;
             for (int dx = 0; dx < squareSize; dx++) {
                 for (int dz = 0; dz < squareSize; dz++) {
-                    placeBlock(world, square.getWorldX() + dx, floorY, square.getWorldZ() + dz, blockType);
+                    placeBlock(world, worldStartX + dx, floorY, worldStartZ + dz, blockType);
                 }
             }
         }
+
+        LOGGER.at(Level.INFO).log(
+                "Arena generation complete for map '%s': %s x %s blocks.",
+                map.getName(),
+                width,
+                depth
+        );
     }
 
     // signature now takes playerEntityRef so we can teleport
@@ -273,6 +270,14 @@ public class EnclaveManager {
         return enclaves[index];
     }
 
+    public MapRegistry getMapRegistry() {
+        return mapRegistry;
+    }
+
+    public GridManager getGridManager() {
+        return gridManager;
+    }
+
     public void setAssignmentListener(@Nullable EnclaveAssignmentListener listener) {
         this.assignmentListener = listener;
     }
@@ -332,8 +337,8 @@ public class EnclaveManager {
     private CompletableFuture<Void> preloadArenaChunks(World world) {
         int minX = ArenaConstants.ARENA_ORIGIN_X - preloadMarginChunks * ChunkUtil.SIZE;
         int minZ = ArenaConstants.ARENA_ORIGIN_Z - preloadMarginChunks * ChunkUtil.SIZE;
-        int maxX = ArenaConstants.ARENA_ORIGIN_X + ArenaConstants.totalArenaWidth() - 1 + preloadMarginChunks * ChunkUtil.SIZE;
-        int maxZ = ArenaConstants.ARENA_ORIGIN_Z + ArenaConstants.totalArenaDepth() - 1 + preloadMarginChunks * ChunkUtil.SIZE;
+        int maxX = ArenaConstants.ARENA_ORIGIN_X + getArenaWidthBlocks() - 1 + preloadMarginChunks * ChunkUtil.SIZE;
+        int maxZ = ArenaConstants.ARENA_ORIGIN_Z + getArenaDepthBlocks() - 1 + preloadMarginChunks * ChunkUtil.SIZE;
 
         int minChunkX = ChunkUtil.chunkCoordinate(minX);
         int minChunkZ = ChunkUtil.chunkCoordinate(minZ);
@@ -393,6 +398,30 @@ public class EnclaveManager {
         if (!bootstrapExecutor.isShutdown()) {
             bootstrapExecutor.shutdown();
         }
+    }
+
+    private int getArenaWidthBlocks() {
+        MapDefinition map = mapRegistry.getActiveMap();
+        if (map == null) {
+            return ArenaConstants.totalArenaWidth();
+        }
+        return Math.max(1, map.getGridWidth() * ArenaConstants.SQUARE_SIZE);
+    }
+
+    private int getArenaDepthBlocks() {
+        MapDefinition map = mapRegistry.getActiveMap();
+        if (map == null) {
+            return ArenaConstants.totalArenaDepth();
+        }
+        return Math.max(1, map.getGridHeight() * ArenaConstants.SQUARE_SIZE);
+    }
+
+    private MapDefinition requireActiveMap() {
+        MapDefinition map = mapRegistry.getActiveMap();
+        if (map == null) {
+            throw new IllegalStateException("No active map selected in MapRegistry.");
+        }
+        return map;
     }
 
     private void ensureArenaGenerated(World world) {

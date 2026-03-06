@@ -14,6 +14,7 @@ import com.hypixel.hytale.server.core.modules.entity.tracker.NetworkId;
 import com.hypixel.hytale.server.core.universe.Universe;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+import dev.duckslock.combat.ElementWheel;
 import dev.duckslock.commands.ArenaDebugRoundService;
 import dev.duckslock.enclave.Enclave;
 import dev.duckslock.enclave.EnclaveManager;
@@ -24,7 +25,9 @@ import dev.duckslock.grid.GridSquareType;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 public class TowerManager {
@@ -41,32 +44,40 @@ public class TowerManager {
     }
 
     public PlacementResult placeTower(TowerType type, int worldX, int worldZ) {
-        GridSquare square = enclave.getSquareAtWorldPos(worldX, worldZ);
-        if (square == null) {
+        GridSquare anchor = enclave.getSquareAtWorldPos(worldX, worldZ);
+        if (anchor == null) {
             return PlacementResult.fail("That square is not inside your enclave.");
         }
 
-        if (square.getType() != GridSquareType.BUILDABLE) {
-            return PlacementResult.fail("You can only place towers on BUILDABLE squares.");
+        List<GridSquare> footprint = resolveTwoByTwoFootprint(anchor);
+        if (footprint == null) {
+            return PlacementResult.fail("Tower footprint must fit a 2x2 area inside your enclave.");
         }
 
-        if (square.isOccupied()) {
-            return PlacementResult.fail("That square is already occupied.");
+        for (GridSquare square : footprint) {
+            if (square.getType() != GridSquareType.BUILDABLE) {
+                return PlacementResult.fail("All 2x2 footprint squares must be BUILDABLE.");
+            }
+            if (square.isOccupied()) {
+                return PlacementResult.fail("One of the 2x2 footprint squares is already occupied.");
+            }
         }
 
         if (!enclave.spendGold(type.getCost())) {
             return PlacementResult.fail("Not enough gold.");
         }
 
-        Tower tower = new Tower(type, square, enclave);
+        Tower tower = new Tower(type, anchor, footprint, enclave);
         String spawnFailure = spawnTowerEntity(tower);
         if (spawnFailure != null) {
             enclave.addGold(type.getCost());
             return PlacementResult.fail(spawnFailure);
         }
 
-        square.setTower(tower);
-        square.setTowerOwner(enclave.getOwnerUuid());
+        for (GridSquare square : footprint) {
+            square.setTower(tower);
+            square.setTowerOwner(enclave.getOwnerUuid());
+        }
         towers.add(tower);
         return PlacementResult.ok(tower);
     }
@@ -126,7 +137,9 @@ public class TowerManager {
     public void removeTower(Tower tower) {
         towers.remove(tower);
         tower.setCurrentTarget(null);
-        tower.getSquare().clearTower();
+        for (GridSquare square : tower.getOccupiedSquares()) {
+            square.clearTower();
+        }
         removeTowerEntity(tower);
     }
 
@@ -155,7 +168,11 @@ public class TowerManager {
         List<Enemy> enemies = debugRoundService.getActiveEnemiesForEnclave(enclave.getIndex());
         if (enemies.isEmpty()) {
             for (Tower tower : towers) {
-                tower.setCurrentTarget(null);
+                if (tower.getAttackKind() == TowerAttackKind.SUPPORT_TRICKERY) {
+                    processTrickerySupportTick(tower);
+                } else {
+                    tower.setCurrentTarget(null);
+                }
             }
             return;
         }
@@ -174,6 +191,11 @@ public class TowerManager {
     }
 
     private void processTowerTick(Tower tower, List<Enemy> enemies, long nowMs) {
+        if (tower.getAttackKind() == TowerAttackKind.SUPPORT_TRICKERY) {
+            processTrickerySupportTick(tower);
+            return;
+        }
+
         Enemy target = tower.getCurrentTarget();
         if (target == null || target.isDead() || !isEnemyInRange(tower, target)) {
             target = pickTarget(tower, enemies);
@@ -190,19 +212,18 @@ public class TowerManager {
         }
 
         int rawDamage = tower.getEffectiveDamage();
-        int actualDamage = rawDamage;
-        if (!tower.getType().isIgnoreArmor()) {
-            actualDamage = Math.max(1, (int) Math.round(rawDamage * (1.0d - target.getArmorFraction())));
+        if (rawDamage <= 0) {
+            return;
         }
 
-        boolean died = target.damage(actualDamage);
-        if (tower.getType() == TowerType.FROST && tower.getEffectiveSlowPercent() > 0d) {
-            target.applySlow(tower.getEffectiveSlowPercent(), tower.getEffectiveSlowDurationMs(), nowMs);
+        switch (tower.getAttackKind()) {
+            case DIRECT -> applyDamage(tower, target, 1.0d, nowMs);
+            case SPLASH -> applySplashDamage(tower, target, enemies, nowMs);
+            case CHAIN -> applyChainDamage(tower, target, enemies, nowMs);
+            case SUPPORT_TRICKERY -> processTrickerySupportTick(tower);
         }
-
         tower.markAttack(nowMs);
-        if (died) {
-            debugRoundService.resolveEnemyKilledFromCombat(target);
+        if (target.isDead()) {
             tower.setCurrentTarget(null);
         }
     }
@@ -248,9 +269,8 @@ public class TowerManager {
             return false;
         }
 
-        double squareCenterOffset = ArenaConstants.SQUARE_SIZE / 2.0d;
-        double towerX = tower.getSquare().getWorldX() + squareCenterOffset;
-        double towerZ = tower.getSquare().getWorldZ() + squareCenterOffset;
+        double towerX = tower.getCenterWorldX();
+        double towerZ = tower.getCenterWorldZ();
         double dx = position.x - towerX;
         double dz = position.z - towerZ;
         double distanceSq = dx * dx + dz * dz;
@@ -276,7 +296,7 @@ public class TowerManager {
             Model model = Model.createScaledModel(modelAsset, 1.0f);
 
             Holder<EntityStore> holder = EntityStore.REGISTRY.newHolder();
-            double centerOffset = ArenaConstants.SQUARE_SIZE / 2.0d;
+            double centerOffset = ArenaConstants.SQUARE_SIZE;
             Vector3d position = new Vector3d(
                     tower.getSquare().getWorldX() + centerOffset,
                     ArenaConstants.ARENA_FLOOR_Y + 1.0d,
@@ -316,7 +336,169 @@ public class TowerManager {
             if (towerRef != null && towerRef.isValid()) {
                 store.removeEntity(towerRef, RemoveReason.REMOVE);
             }
+            tower.setEntityRef(null);
         });
+    }
+
+    @Nullable
+    private List<GridSquare> resolveTwoByTwoFootprint(GridSquare anchor) {
+        List<GridSquare> footprint = new ArrayList<>(4);
+        for (int dx = 0; dx < 2; dx++) {
+            for (int dz = 0; dz < 2; dz++) {
+                GridSquare square = enclave.getSquare(anchor.getGridX() + dx, anchor.getGridZ() + dz);
+                if (square == null) {
+                    return null;
+                }
+                footprint.add(square);
+            }
+        }
+        return footprint;
+    }
+
+    private void applySplashDamage(Tower tower, Enemy primary, List<Enemy> enemies, long nowMs) {
+        Vector3f primaryPosition = primary.getPosition();
+        if (primaryPosition == null) {
+            applyDamage(tower, primary, 1.0d, nowMs);
+            return;
+        }
+
+        double splashRadiusBlocks = tower.getEffectiveSplashRadius() * ArenaConstants.SQUARE_SIZE;
+        double splashRadiusSq = splashRadiusBlocks * splashRadiusBlocks;
+        for (Enemy enemy : enemies) {
+            if (enemy.isDead()) {
+                continue;
+            }
+            Vector3f position = enemy.getPosition();
+            if (position == null) {
+                continue;
+            }
+
+            double dx = position.x - primaryPosition.x;
+            double dz = position.z - primaryPosition.z;
+            if (dx * dx + dz * dz > splashRadiusSq) {
+                continue;
+            }
+
+            double multiplier = enemy == primary ? 1.0d : tower.getSplashFalloff();
+            applyDamage(tower, enemy, multiplier, nowMs);
+        }
+    }
+
+    private void applyChainDamage(Tower tower, Enemy primary, List<Enemy> enemies, long nowMs) {
+        int remainingBounces = Math.max(0, tower.getChainBounces());
+        double chainRangeBlocks = tower.getEffectiveChainRange() * ArenaConstants.SQUARE_SIZE;
+        double damageScale = 1.0d;
+        Enemy current = primary;
+        Set<Enemy> visited = new HashSet<>();
+
+        while (current != null) {
+            visited.add(current);
+            applyDamage(tower, current, damageScale, nowMs);
+            if (remainingBounces <= 0) {
+                break;
+            }
+            current = pickNearestChainTarget(current, enemies, visited, chainRangeBlocks);
+            damageScale = Math.max(0.05d, damageScale * tower.getChainFalloff());
+            remainingBounces--;
+        }
+    }
+
+    @Nullable
+    private Enemy pickNearestChainTarget(Enemy from, List<Enemy> enemies, Set<Enemy> visited, double chainRangeBlocks) {
+        Vector3f fromPosition = from.getPosition();
+        if (fromPosition == null) {
+            return null;
+        }
+
+        double bestDistanceSq = chainRangeBlocks * chainRangeBlocks;
+        Enemy best = null;
+        for (Enemy candidate : enemies) {
+            if (candidate.isDead() || visited.contains(candidate)) {
+                continue;
+            }
+            Vector3f position = candidate.getPosition();
+            if (position == null) {
+                continue;
+            }
+            double dx = position.x - fromPosition.x;
+            double dz = position.z - fromPosition.z;
+            double distanceSq = dx * dx + dz * dz;
+            if (distanceSq <= bestDistanceSq) {
+                bestDistanceSq = distanceSq;
+                best = candidate;
+            }
+        }
+        return best;
+    }
+
+    private void applyDamage(Tower tower, Enemy target, double damageMultiplier, long nowMs) {
+        if (target.isDead()) {
+            return;
+        }
+
+        double rawDamage = tower.getEffectiveDamage() * Math.max(0.05d, damageMultiplier);
+        double damageAfterElement = rawDamage * ElementWheel.damageMultiplier(
+                tower.getDamageElement(),
+                target.getElement()
+        );
+        if (!tower.getType().isIgnoreArmor()) {
+            damageAfterElement *= (1.0d - target.getArmorFraction());
+        }
+        int actualDamage = Math.max(1, (int) Math.round(damageAfterElement));
+
+        boolean died = target.damage(actualDamage);
+        if (tower.getType() == TowerType.FROST && tower.getEffectiveSlowPercent() > 0d) {
+            target.applySlow(tower.getEffectiveSlowPercent(), tower.getEffectiveSlowDurationMs(), nowMs);
+        }
+        if (died) {
+            debugRoundService.resolveEnemyKilledFromCombat(target);
+        }
+    }
+
+    private void processTrickerySupportTick(Tower supportTower) {
+        if (supportTower.isSupportBuffApplied()) {
+            return;
+        }
+
+        Tower best = pickBestTrickeryTarget(supportTower);
+        if (best == null) {
+            return;
+        }
+
+        best.applyExternalDamageMultiplier(1.35d);
+        best.markTrickeryBuffed();
+        supportTower.markSupportBuffApplied();
+    }
+
+    @Nullable
+    private Tower pickBestTrickeryTarget(Tower supportTower) {
+        Tower best = null;
+        for (Tower candidate : towers) {
+            if (candidate == supportTower) {
+                continue;
+            }
+            if (candidate.getAttackKind() == TowerAttackKind.SUPPORT_TRICKERY) {
+                continue;
+            }
+            if (candidate.isTrickeryBuffed()) {
+                continue;
+            }
+            if (!isTowerInRange(supportTower, candidate, supportTower.getEffectiveRange())) {
+                continue;
+            }
+
+            if (best == null || candidate.getEffectiveDamage() > best.getEffectiveDamage()) {
+                best = candidate;
+            }
+        }
+        return best;
+    }
+
+    private boolean isTowerInRange(Tower source, Tower target, double rangeSquares) {
+        double rangeBlocks = rangeSquares * ArenaConstants.SQUARE_SIZE;
+        double dx = source.getCenterWorldX() - target.getCenterWorldX();
+        double dz = source.getCenterWorldZ() - target.getCenterWorldZ();
+        return (dx * dx + dz * dz) <= rangeBlocks * rangeBlocks;
     }
 
     public static final class PlacementResult {
