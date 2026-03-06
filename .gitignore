@@ -43,6 +43,7 @@ build/
 .gradle
 .kotlin
 devserver
+converter
 /.idea/
 # Ignore Gradle build output directory
 build
