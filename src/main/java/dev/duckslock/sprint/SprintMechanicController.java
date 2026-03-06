@@ -33,6 +33,7 @@ public final class SprintMechanicController {
         MovementSettings settings = MovementConfig.DEFAULT_MOVEMENT.toPacket();
         float fallbackSprintMultiplier = settings.forwardSprintSpeedMultiplier;
 
+        settings.forwardRunSpeedMultiplier = fallbackSprintMultiplier;
         settings.backwardRunSpeedMultiplier = sprint.backwardRunSpeedMultiplier > 0f
                 ? sprint.backwardRunSpeedMultiplier
                 : fallbackSprintMultiplier;

@@ -284,8 +284,8 @@ public class ArenaDebugRoundService implements EnclaveAssignmentListener {
     }
 
     private Vector3f toYawRotation(double dx, double dz) {
-        float yaw = (float) Math.atan2(dx, dz);
-        return new Vector3f(0f, yaw, 0f);
+        Vector3f lookRotation = Vector3f.lookAt(new Vector3d(dx, 0d, dz));
+        return new Vector3f(0f, lookRotation.getYaw(), 0f);
     }
 
     private void setWalkingMovementState(Store<EntityStore> store, Ref<EntityStore> ref) {
