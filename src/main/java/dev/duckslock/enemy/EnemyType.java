@@ -59,4 +59,12 @@ public enum EnemyType {
         this.damage = config.damage;
         this.isBoss = config.boss;
     }
+
+    public int getDamage() {
+        return damage;
+    }
+
+    public int getBounty() {
+        return bounty;
+    }
 }

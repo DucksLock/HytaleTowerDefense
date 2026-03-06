@@ -17,11 +17,11 @@ import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import dev.duckslock.config.ModConfigHolder;
 import dev.duckslock.config.TDConfig;
 import dev.duckslock.enclave.Enclave;
-import dev.duckslock.enclave.EnclaveAssignmentListener;
 import dev.duckslock.enclave.EnclaveManager;
 import dev.duckslock.enemy.Enemy;
 import dev.duckslock.enemy.EnemySpawner;
 import dev.duckslock.grid.ArenaConstants;
+import dev.duckslock.wave.WaveManager;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -29,13 +29,13 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 
-public class ArenaDebugRoundService implements EnclaveAssignmentListener {
+public class ArenaDebugRoundService {
 
     private static final HytaleLogger LOGGER = HytaleLogger.forEnclosingClass();
 
-    private final EnclaveManager enclaveManager;
     private final EnemySpawner enemySpawner = new EnemySpawner();
     private final long movementTickMs;
     private final double baseMoveBlocksPerSecond;
@@ -51,12 +51,7 @@ public class ArenaDebugRoundService implements EnclaveAssignmentListener {
                 return t;
             });
 
-    private volatile boolean enabled;
-    private volatile int activeRoundId;
-    private volatile boolean triggerOnlyOnNewAssignment;
-
     public ArenaDebugRoundService(EnclaveManager enclaveManager) {
-        this.enclaveManager = enclaveManager;
         TDConfig.DebugRoundsConfig config = ModConfigHolder.get().debugRounds;
         this.movementTickMs = config.movementTickMs;
         this.baseMoveBlocksPerSecond = config.baseMoveBlocksPerSecond;
@@ -64,9 +59,6 @@ public class ArenaDebugRoundService implements EnclaveAssignmentListener {
         this.enemySpawnSpacingMs = config.enemySpawnSpacingMs;
         this.entityRefWaitTimeoutMs = config.entityRefWaitTimeoutMs;
         this.walkAnimationCandidates = config.walkAnimationCandidates.toArray(new String[0]);
-        this.enabled = config.enabledByDefault;
-        this.activeRoundId = config.activeRoundId;
-        this.triggerOnlyOnNewAssignment = config.triggerOnlyOnNewAssignment;
     }
 
     public void start() {
@@ -81,85 +73,82 @@ public class ArenaDebugRoundService implements EnclaveAssignmentListener {
         trackedEnemies.clear();
     }
 
-    @Override
-    public void onAssigned(Ref<EntityStore> playerEntityRef, UUID playerUuid, Enclave enclave, boolean newAssignment) {
-        if (!enabled) {
-            return;
-        }
-        if (triggerOnlyOnNewAssignment && !newAssignment) {
-            return;
-        }
-        enclaveManager.runAfterArenaGenerated(() -> spawnRoundForEnclave(enclave.getIndex(), activeRoundId));
-    }
-
-    public boolean spawnRoundForEnclave(int enclaveIndex, int roundId) {
-        if (enclaveIndex < 0 || enclaveIndex >= enclaveManager.getEnclaves().length) {
-            return false;
-        }
-
-        Enclave enclave = enclaveManager.getEnclave(enclaveIndex);
-        DebugRoundDefinition round = DebugRoundDefinitions.get(roundId);
-        if (round == null) {
+    public boolean startDebugRound(Enclave enclave, DebugRoundDefinition round, WaveManager waveManager) {
+        if (enclave == null || round == null || waveManager == null) {
             return false;
         }
 
         List<Vector3d> worldWaypoints = toWorldWaypoints(enclave, round.getLocalWaypoints());
         if (worldWaypoints.size() < 2) {
-            LOGGER.at(Level.WARNING).log("Round %s has fewer than 2 waypoints; not spawning.", roundId);
+            LOGGER.at(Level.WARNING).log("Round %s has fewer than 2 waypoints; not spawning.", round.getName());
             return false;
         }
 
-        for (DebugRoundDefinition.SpawnBatch batch : round.getBatches()) {
-            scheduler.schedule(() -> spawnBatch(enclave, batch, worldWaypoints),
-                    batch.getDelayMs(), TimeUnit.MILLISECONDS);
+        int totalToSpawn = totalEnemies(round);
+        if (totalToSpawn <= 0) {
+            return false;
         }
 
-        LOGGER.at(Level.INFO).log("Queued debug round %s (%s) for enclave %s.",
-                roundId, round.getName(), enclaveIndex);
+        AtomicInteger spawnedCount = new AtomicInteger(0);
+        for (DebugRoundDefinition.SpawnBatch batch : round.getBatches()) {
+            int count = Math.max(1, batch.getCount());
+            for (int i = 0; i < count; i++) {
+                long delay = Math.max(0L, batch.getDelayMs()) + i * enemySpawnSpacingMs;
+                scheduler.schedule(
+                        () -> spawnOneEnemy(enclave, batch, worldWaypoints, waveManager, spawnedCount, totalToSpawn),
+                        delay,
+                        TimeUnit.MILLISECONDS
+                );
+            }
+        }
+
+        LOGGER.at(Level.INFO).log("Queued debug round '%s' for enclave %s.", round.getName(), enclave.getIndex());
         return true;
     }
 
-    @Nullable
-    public Enclave findEnclaveForPlayer(UUID playerUuid) {
-        return enclaveManager.getEnclaveForPlayer(playerUuid);
-    }
-
-    public boolean isEnabled() {
-        return enabled;
-    }
-
-    public void setEnabled(boolean enabled) {
-        this.enabled = enabled;
-    }
-
-    public int getActiveRoundId() {
-        return activeRoundId;
-    }
-
-    public void setActiveRoundId(int activeRoundId) {
-        this.activeRoundId = activeRoundId;
-    }
-
-    public boolean isTriggerOnlyOnNewAssignment() {
-        return triggerOnlyOnNewAssignment;
-    }
-
-    public void setTriggerOnlyOnNewAssignment(boolean triggerOnlyOnNewAssignment) {
-        this.triggerOnlyOnNewAssignment = triggerOnlyOnNewAssignment;
-    }
-
-    private void spawnBatch(Enclave enclave, DebugRoundDefinition.SpawnBatch batch, List<Vector3d> worldWaypoints) {
-        Vector3d start = worldWaypoints.get(0);
-        int count = Math.max(1, batch.getCount());
-
-        for (int i = 0; i < count; i++) {
-            long delay = i * enemySpawnSpacingMs;
-            scheduler.schedule(() -> {
-                Vector3f spawnPos = new Vector3f((float) start.x, (float) start.y, (float) start.z);
-                Enemy enemy = enemySpawner.spawn(batch.getEnemyType(), enclave.getIndex(), spawnPos);
-                trackedEnemies.put(enemy.getId(), new TrackedEnemy(enemy, worldWaypoints, 1, System.currentTimeMillis()));
-            }, delay, TimeUnit.MILLISECONDS);
+    public void clearEnemiesForEnclave(int enclaveIndex) {
+        List<TrackedEnemy> toRemove = new ArrayList<>();
+        for (TrackedEnemy tracked : trackedEnemies.values()) {
+            if (tracked.enemy.getEnclaveIndex() == enclaveIndex) {
+                toRemove.add(tracked);
+            }
         }
+
+        for (TrackedEnemy tracked : toRemove) {
+            trackedEnemies.remove(tracked.enemy.getId());
+            enemySpawner.remove(tracked.enemy);
+        }
+    }
+
+    private void spawnOneEnemy(
+            Enclave enclave,
+            DebugRoundDefinition.SpawnBatch batch,
+            List<Vector3d> worldWaypoints,
+            WaveManager waveManager,
+            AtomicInteger spawnedCount,
+            int totalToSpawn
+    ) {
+        Vector3d start = worldWaypoints.get(0);
+        Vector3f spawnPos = new Vector3f((float) start.x, (float) start.y, (float) start.z);
+        Enemy enemy = enemySpawner.spawn(batch.getEnemyType(), enclave.getIndex(), spawnPos);
+
+        trackedEnemies.put(
+                enemy.getId(),
+                new TrackedEnemy(enemy, worldWaypoints, 1, System.currentTimeMillis(), enclave, waveManager)
+        );
+        waveManager.onEnemySpawned();
+
+        if (spawnedCount.incrementAndGet() >= totalToSpawn) {
+            waveManager.onAllEnemiesSpawned();
+        }
+    }
+
+    private int totalEnemies(DebugRoundDefinition round) {
+        int total = 0;
+        for (DebugRoundDefinition.SpawnBatch batch : round.getBatches()) {
+            total += Math.max(1, batch.getCount());
+        }
+        return total;
     }
 
     private void scheduleMovementTick() {
@@ -182,15 +171,20 @@ public class ArenaDebugRoundService implements EnclaveAssignmentListener {
     }
 
     private void moveEnemy(World world, TrackedEnemy tracked) {
+        if (tracked.enemy.isDead()) {
+            resolveKilledEnemy(tracked);
+            return;
+        }
+
         Ref<EntityStore> ref = tracked.enemy.getEntityRef();
         if (ref == null) {
             if (System.currentTimeMillis() - tracked.createdAtMs > entityRefWaitTimeoutMs) {
-                trackedEnemies.remove(tracked.enemy.getId());
+                resolveUnspawnedEnemy(tracked);
             }
             return;
         }
         if (!ref.isValid()) {
-            trackedEnemies.remove(tracked.enemy.getId());
+            resolveInvalidEnemy(tracked);
             return;
         }
 
@@ -198,13 +192,12 @@ public class ArenaDebugRoundService implements EnclaveAssignmentListener {
         ensureWalkingAnimation(tracked, ref, store);
         TransformComponent transform = store.getComponent(ref, TransformComponent.getComponentType());
         if (transform == null) {
-            trackedEnemies.remove(tracked.enemy.getId());
+            resolveInvalidEnemy(tracked);
             return;
         }
 
         if (tracked.nextWaypointIndex >= tracked.worldWaypoints.size()) {
-            enemySpawner.remove(tracked.enemy);
-            trackedEnemies.remove(tracked.enemy.getId());
+            resolveLeakedEnemy(tracked);
             return;
         }
 
@@ -219,8 +212,7 @@ public class ArenaDebugRoundService implements EnclaveAssignmentListener {
         if (distance <= waypointReachedDistance) {
             tracked.nextWaypointIndex++;
             if (tracked.nextWaypointIndex >= tracked.worldWaypoints.size()) {
-                enemySpawner.remove(tracked.enemy);
-                trackedEnemies.remove(tracked.enemy.getId());
+                resolveLeakedEnemy(tracked);
                 return;
             }
 
@@ -248,6 +240,41 @@ public class ArenaDebugRoundService implements EnclaveAssignmentListener {
         transform.teleportRotation(toYawRotation(dx, dz));
         setWalkingMovementState(store, ref);
         tracked.enemy.setPosition(next.toVector3f());
+    }
+
+    private void resolveKilledEnemy(TrackedEnemy tracked) {
+        trackedEnemies.remove(tracked.enemy.getId());
+        enemySpawner.remove(tracked.enemy);
+
+        int bounty = tracked.enemy.getType().getBounty();
+        if (tracked.waveManager.isEarlyWaveTriggered()) {
+            bounty = Math.max(1, Math.round(bounty * 1.1f));
+        }
+        tracked.enclave.addGold(bounty);
+        tracked.waveManager.onEnemyResolved();
+    }
+
+    private void resolveLeakedEnemy(TrackedEnemy tracked) {
+        trackedEnemies.remove(tracked.enemy.getId());
+        enemySpawner.remove(tracked.enemy);
+
+        boolean defeated = tracked.enclave.deductLives(tracked.enemy.getType().getDamage());
+        tracked.waveManager.onEnemyResolved();
+        if (defeated) {
+            tracked.waveManager.onEnclaveDefeated();
+        }
+    }
+
+    private void resolveInvalidEnemy(TrackedEnemy tracked) {
+        trackedEnemies.remove(tracked.enemy.getId());
+        enemySpawner.remove(tracked.enemy);
+        tracked.waveManager.onEnemyResolved();
+    }
+
+    private void resolveUnspawnedEnemy(TrackedEnemy tracked) {
+        trackedEnemies.remove(tracked.enemy.getId());
+        enemySpawner.remove(tracked.enemy);
+        tracked.waveManager.onEnemyResolved();
     }
 
     private void ensureWalkingAnimation(TrackedEnemy tracked, Ref<EntityStore> ref, Store<EntityStore> store) {
@@ -320,14 +347,25 @@ public class ArenaDebugRoundService implements EnclaveAssignmentListener {
         private final Enemy enemy;
         private final List<Vector3d> worldWaypoints;
         private final long createdAtMs;
+        private final Enclave enclave;
+        private final WaveManager waveManager;
         private int nextWaypointIndex;
         private boolean walkAnimationSet;
 
-        private TrackedEnemy(Enemy enemy, List<Vector3d> worldWaypoints, int nextWaypointIndex, long createdAtMs) {
+        private TrackedEnemy(
+                Enemy enemy,
+                List<Vector3d> worldWaypoints,
+                int nextWaypointIndex,
+                long createdAtMs,
+                Enclave enclave,
+                WaveManager waveManager
+        ) {
             this.enemy = enemy;
             this.worldWaypoints = worldWaypoints;
             this.nextWaypointIndex = nextWaypointIndex;
             this.createdAtMs = createdAtMs;
+            this.enclave = enclave;
+            this.waveManager = waveManager;
         }
     }
 }

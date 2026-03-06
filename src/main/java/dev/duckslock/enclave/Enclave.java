@@ -19,6 +19,11 @@ public class Enclave {
     private final int worldStartX;
     private final int worldStartZ;
     private final GridSquare[][] grid;
+    private final int startingLives;
+    private final int startingGold;
+
+    private int lives;
+    private int gold;
 
     @Nullable
     private UUID ownerUuid;
@@ -26,9 +31,13 @@ public class Enclave {
     @Nullable
     private String ownerName;
 
-    public Enclave(int index, EnclaveColor color) {
+    public Enclave(int index, EnclaveColor color, int startingLives, int startingGold) {
         this.index = index;
         this.color = color;
+        this.startingLives = Math.max(1, startingLives);
+        this.startingGold = Math.max(0, startingGold);
+        this.lives = this.startingLives;
+        this.gold = this.startingGold;
 
         int column = index % ArenaConstants.ENCLAVES_PER_ROW;
         int row = index / ArenaConstants.ENCLAVES_PER_ROW;
@@ -61,6 +70,38 @@ public class Enclave {
     public void clearOwner() {
         this.ownerUuid = null;
         this.ownerName = null;
+    }
+
+    public synchronized boolean deductLives(int amount) {
+        if (amount <= 0) {
+            return lives <= 0;
+        }
+
+        lives = Math.max(0, lives - amount);
+        return lives <= 0;
+    }
+
+    public synchronized void addGold(int amount) {
+        if (amount <= 0) {
+            return;
+        }
+        gold += amount;
+    }
+
+    public synchronized boolean spendGold(int amount) {
+        if (amount <= 0) {
+            return true;
+        }
+        if (gold < amount) {
+            return false;
+        }
+        gold -= amount;
+        return true;
+    }
+
+    public synchronized void resetEconomyAndLives() {
+        lives = startingLives;
+        gold = startingGold;
     }
 
     @Nullable
@@ -148,6 +189,14 @@ public class Enclave {
     @Nullable
     public String getOwnerName() {
         return ownerName;
+    }
+
+    public synchronized int getLives() {
+        return lives;
+    }
+
+    public synchronized int getGold() {
+        return gold;
     }
 
     @Override

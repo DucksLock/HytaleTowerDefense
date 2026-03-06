@@ -59,12 +59,18 @@ public class EnclaveManager {
 
     public EnclaveManager() {
         TDConfig.WorldConfig worldConfig = ModConfigHolder.get().world;
+        TDConfig.GameplayConfig gameplayConfig = ModConfigHolder.get().gameplay;
         this.arenaMarkerFile = worldConfig.arenaMarkerFile;
         this.preloadMarginChunks = worldConfig.preloadMarginChunks;
         this.bootstrapPollMs = worldConfig.bootstrapPollMs;
 
         for (int i = 0; i < ArenaConstants.ENCLAVE_COUNT; i++) {
-            enclaves[i] = new Enclave(i, EnclaveColor.fromIndex(i));
+            enclaves[i] = new Enclave(
+                    i,
+                    EnclaveColor.fromIndex(i),
+                    gameplayConfig.startingLives,
+                    gameplayConfig.startingGold
+            );
         }
 
         LOGGER.at(Level.INFO).log("Initialized %s enclaves.", ArenaConstants.ENCLAVE_COUNT);
@@ -205,6 +211,7 @@ public class EnclaveManager {
         }
 
         next.assignOwner(uuid, name);
+        next.resetEconomyAndLives();
         player.sendMessage(Message.raw("[TD] Welcome " + name + "! Your color is "
                 + next.getColor().getDisplayName() + " (enclave " + next.getIndex() + ")."));
         LOGGER.at(Level.INFO).log("Assigned %s to enclave %s (%s).",
@@ -231,6 +238,7 @@ public class EnclaveManager {
                 LOGGER.at(Level.INFO).log("Released enclave %s from %s.",
                         enclave.getIndex(), enclave.getOwnerName());
                 enclave.clearOwner();
+                enclave.resetEconomyAndLives();
                 return;
             }
         }

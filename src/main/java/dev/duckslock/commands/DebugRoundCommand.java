@@ -4,17 +4,19 @@ import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.command.system.CommandContext;
 import com.hypixel.hytale.server.core.command.system.basecommands.CommandBase;
 import dev.duckslock.enclave.Enclave;
+import dev.duckslock.game.GameManager;
+import dev.duckslock.wave.WaveManager;
 
 import java.util.Arrays;
 import java.util.Locale;
 
 public class DebugRoundCommand extends CommandBase {
 
-    private final ArenaDebugRoundService debugService;
+    private final GameManager gameManager;
 
-    public DebugRoundCommand(ArenaDebugRoundService debugService) {
+    public DebugRoundCommand(GameManager gameManager) {
         super("tddebuground", "Tower defense debug round controls.");
-        this.debugService = debugService;
+        this.gameManager = gameManager;
         setAllowsExtraArguments(true);
     }
 
@@ -30,11 +32,11 @@ public class DebugRoundCommand extends CommandBase {
         switch (action) {
             case "status" -> sendStatus(ctx);
             case "enable" -> {
-                debugService.setEnabled(true);
+                gameManager.setEnabled(true);
                 ctx.sendMessage(Message.raw("[TD] Debug round auto-spawn enabled."));
             }
             case "disable" -> {
-                debugService.setEnabled(false);
+                gameManager.setEnabled(false);
                 ctx.sendMessage(Message.raw("[TD] Debug round auto-spawn disabled."));
             }
             case "set" -> setRound(ctx, tokens);
@@ -55,7 +57,7 @@ public class DebugRoundCommand extends CommandBase {
                     + " (available: " + DebugRoundDefinitions.ids() + ")"));
             return;
         }
-        debugService.setActiveRoundId(roundId);
+        gameManager.setActiveRoundId(roundId);
         ctx.sendMessage(Message.raw("[TD] Active debug round set to " + roundId + "."));
     }
 
@@ -65,9 +67,9 @@ public class DebugRoundCommand extends CommandBase {
             ctx.sendMessage(Message.raw("[TD] Usage: /tddebuground newonly <1|0>"));
             return;
         }
-        debugService.setTriggerOnlyOnNewAssignment(toggle == 1);
+        gameManager.setTriggerOnlyOnNewAssignment(toggle == 1);
         ctx.sendMessage(Message.raw("[TD] Trigger mode set to new-assignment-only="
-                + debugService.isTriggerOnlyOnNewAssignment()));
+                + gameManager.isTriggerOnlyOnNewAssignment()));
     }
 
     private void spawnCommand(CommandContext ctx, String[] tokens) {
@@ -75,7 +77,7 @@ public class DebugRoundCommand extends CommandBase {
         Integer roundOverride = parseInt(tokens, 2);
 
         if (ctx.isPlayer()) {
-            Enclave enclave = debugService.findEnclaveForPlayer(ctx.sender().getUuid());
+            Enclave enclave = gameManager.findEnclaveForPlayer(ctx.sender().getUuid());
             if (enclave == null) {
                 ctx.sendMessage(Message.raw("[TD] You are not assigned to an enclave."));
                 return;
@@ -93,16 +95,22 @@ public class DebugRoundCommand extends CommandBase {
             return;
         }
 
-        int roundId = roundOverride != null ? roundOverride : debugService.getActiveRoundId();
+        int roundId = roundOverride != null ? roundOverride : gameManager.getActiveRoundId();
         if (DebugRoundDefinitions.get(roundId) == null) {
             ctx.sendMessage(Message.raw("[TD] Unknown round id: " + roundId
                     + " (available: " + DebugRoundDefinitions.ids() + ")"));
             return;
         }
 
-        boolean ok = debugService.spawnRoundForEnclave(enclaveIndex, roundId);
+        boolean ok = gameManager.startDebugRound(enclaveIndex, roundId);
         if (!ok) {
-            ctx.sendMessage(Message.raw("[TD] Failed to spawn round. Check enclave/round values."));
+            WaveManager waveManager = gameManager.getWaveManager(enclaveIndex);
+            if (waveManager != null && waveManager.getState() != WaveManager.State.IDLE) {
+                ctx.sendMessage(Message.raw("[TD] Cannot spawn now: enclave " + enclaveIndex
+                        + " is in state " + waveManager.getState() + "."));
+            } else {
+                ctx.sendMessage(Message.raw("[TD] Failed to spawn round. Check enclave/round values."));
+            }
             return;
         }
 
@@ -110,9 +118,9 @@ public class DebugRoundCommand extends CommandBase {
     }
 
     private void sendStatus(CommandContext ctx) {
-        ctx.sendMessage(Message.raw("[TD] enabled=" + debugService.isEnabled()
-                + ", activeRound=" + debugService.getActiveRoundId()
-                + ", newOnly=" + debugService.isTriggerOnlyOnNewAssignment()
+        ctx.sendMessage(Message.raw("[TD] enabled=" + gameManager.isEnabled()
+                + ", activeRound=" + gameManager.getActiveRoundId()
+                + ", newOnly=" + gameManager.isTriggerOnlyOnNewAssignment()
                 + ", availableRounds=" + DebugRoundDefinitions.ids()));
     }
 

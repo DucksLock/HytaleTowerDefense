@@ -19,6 +19,7 @@ import dev.duckslock.config.TDConfig;
 import dev.duckslock.config.TDConfigManager;
 import dev.duckslock.enclave.EnclaveManager;
 import dev.duckslock.enemy.EnemyType;
+import dev.duckslock.game.GameManager;
 import dev.duckslock.grid.ArenaConstants;
 import dev.duckslock.sprint.SprintMechanicController;
 
@@ -34,6 +35,7 @@ public class TowerDefensePlugin extends JavaPlugin {
     private static TowerDefensePlugin instance;
     private EnclaveManager enclaveManager;
     private ArenaDebugRoundService debugRoundService;
+    private GameManager gameManager;
     private final TDCameraController cameraController = new TDCameraController();
     private TDConfig config;
 
@@ -70,13 +72,18 @@ public class TowerDefensePlugin extends JavaPlugin {
         enclaveManager.beginWorldBootstrap();
         debugRoundService = new ArenaDebugRoundService(enclaveManager);
         debugRoundService.start();
-        enclaveManager.setAssignmentListener(debugRoundService);
-        getCommandRegistry().registerCommand(new DebugRoundCommand(debugRoundService));
+        gameManager = new GameManager(enclaveManager, debugRoundService);
+        gameManager.start();
+        enclaveManager.setAssignmentListener(gameManager);
+        getCommandRegistry().registerCommand(new DebugRoundCommand(gameManager));
         getLogger().at(Level.INFO).log("Tower Defense plugin started.");
     }
 
     @Override
     protected void shutdown() {
+        if (gameManager != null) {
+            gameManager.shutdown();
+        }
         if (debugRoundService != null) {
             debugRoundService.shutdown();
         }

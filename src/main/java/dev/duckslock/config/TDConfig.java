@@ -11,6 +11,7 @@ public final class TDConfig {
     public WorldConfig world = new WorldConfig();
     public ArenaConfig arena = new ArenaConfig();
     public CameraConfig camera = new CameraConfig();
+    public GameplayConfig gameplay = new GameplayConfig();
     public DebugRoundsConfig debugRounds = new DebugRoundsConfig();
     public SprintConfig sprint = new SprintConfig();
     public Map<String, EnemyConfig> enemies = defaultEnemies();
@@ -141,6 +142,16 @@ public final class TDConfig {
         if (camera == null) {
             camera = new CameraConfig();
         }
+
+        if (gameplay == null) {
+            gameplay = new GameplayConfig();
+        }
+        gameplay.startingLives = positiveInt(gameplay.startingLives, 20);
+        gameplay.startingGold = Math.max(0, gameplay.startingGold);
+        gameplay.betweenWaveIncome = Math.max(0, gameplay.betweenWaveIncome);
+        gameplay.prepareCountdownMs = Math.max(0L, gameplay.prepareCountdownMs);
+        gameplay.cleanupDurationMs = Math.max(0L, gameplay.cleanupDurationMs);
+        gameplay.waveTickMs = Math.max(20L, gameplay.waveTickMs);
 
         if (debugRounds == null) {
             debugRounds = new DebugRoundsConfig();
@@ -310,6 +321,15 @@ public final class TDConfig {
         public float planeNormalX = 0.0f;
         public float planeNormalY = 1.0f;
         public float planeNormalZ = 0.0f;
+    }
+
+    public static final class GameplayConfig {
+        public int startingLives = 20;
+        public int startingGold = 150;
+        public int betweenWaveIncome = 10;
+        public long prepareCountdownMs = 5000L;
+        public long cleanupDurationMs = 1500L;
+        public long waveTickMs = 100L;
     }
 
     public static final class DebugRoundsConfig {
