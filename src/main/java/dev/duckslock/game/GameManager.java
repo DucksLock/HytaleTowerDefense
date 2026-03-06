@@ -11,6 +11,9 @@ import dev.duckslock.config.TDConfig;
 import dev.duckslock.enclave.Enclave;
 import dev.duckslock.enclave.EnclaveAssignmentListener;
 import dev.duckslock.enclave.EnclaveManager;
+import dev.duckslock.tower.TowerManager;
+import dev.duckslock.tower.TowerType;
+import dev.duckslock.tower.UpgradePath;
 import dev.duckslock.wave.WaveManager;
 
 import javax.annotation.Nullable;
@@ -37,6 +40,7 @@ public class GameManager implements EnclaveAssignmentListener {
                 return t;
             });
     private final Map<Integer, WaveManager> waveManagers = new ConcurrentHashMap<>();
+    private final Map<Integer, TowerManager> towerManagers = new ConcurrentHashMap<>();
     private final long tickMs;
 
     private volatile boolean enabled;
@@ -55,6 +59,10 @@ public class GameManager implements EnclaveAssignmentListener {
 
         List<DebugRoundDefinition> waveDefinitions = buildWaveDefinitions();
         for (Enclave enclave : enclaveManager.getEnclaves()) {
+            towerManagers.put(
+                    enclave.getIndex(),
+                    new TowerManager(enclave, debugRoundService)
+            );
             waveManagers.put(
                     enclave.getIndex(),
                     new WaveManager(
@@ -126,6 +134,30 @@ public class GameManager implements EnclaveAssignmentListener {
         return waveManager.triggerEarlyStart();
     }
 
+    public TowerManager.PlacementResult placeTower(int enclaveIndex, TowerType type, int worldX, int worldZ) {
+        TowerManager towerManager = towerManagers.get(enclaveIndex);
+        if (towerManager == null) {
+            return TowerManager.PlacementResult.fail("Tower manager not found for enclave " + enclaveIndex + ".");
+        }
+        return towerManager.placeTower(type, worldX, worldZ);
+    }
+
+    public TowerManager.ActionResult upgradeTower(int enclaveIndex, int worldX, int worldZ, UpgradePath path) {
+        TowerManager towerManager = towerManagers.get(enclaveIndex);
+        if (towerManager == null) {
+            return TowerManager.ActionResult.fail("Tower manager not found for enclave " + enclaveIndex + ".");
+        }
+        return towerManager.upgradeTowerAt(worldX, worldZ, path);
+    }
+
+    public TowerManager.ActionResult sellTower(int enclaveIndex, int worldX, int worldZ) {
+        TowerManager towerManager = towerManagers.get(enclaveIndex);
+        if (towerManager == null) {
+            return TowerManager.ActionResult.fail("Tower manager not found for enclave " + enclaveIndex + ".");
+        }
+        return towerManager.sellTowerAt(worldX, worldZ);
+    }
+
     public void onEnclaveLost(Enclave enclave) {
         LOGGER.at(Level.WARNING).log(
                 "Enclave %s (%s) has lost all lives. Resetting enclave state.",
@@ -139,6 +171,10 @@ public class GameManager implements EnclaveAssignmentListener {
         }
 
         debugRoundService.clearEnemiesForEnclave(enclave.getIndex());
+        TowerManager towerManager = towerManagers.get(enclave.getIndex());
+        if (towerManager != null) {
+            towerManager.clearAllTowers();
+        }
         enclave.resetEconomyAndLives();
     }
 
@@ -180,6 +216,9 @@ public class GameManager implements EnclaveAssignmentListener {
         long nowMs = System.currentTimeMillis();
         for (WaveManager waveManager : waveManagers.values()) {
             waveManager.tick(nowMs);
+        }
+        for (TowerManager towerManager : towerManagers.values()) {
+            towerManager.tick(nowMs);
         }
     }
 

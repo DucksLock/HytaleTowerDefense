@@ -1,194 +1,187 @@
 # WC3-Inspired Tower Defense for Hytale
 
-This project is building a Warcraft III style multiplayer tower defense experience inside Hytale.
+This mod is building a Warcraft III style multiplayer tower defense loop inside Hytale.
 
 ## Current Progress (as of March 6, 2026)
 
-### Working now
+### Core systems working
 
-- Plugin bootstraps cleanly and loads config from disk.
-- Arena layout is generated automatically in the configured world.
-- 8 player enclaves are created and assigned by color (WC3 style player slots/colors).
-- Players are teleported into their own enclave on join.
-- Top-down camera is applied server-side.
-- Sprint behavior is tuned for top-down movement and now behaves consistently on `W/A/S/D`.
-- Debug rounds can spawn enemy batches with waypoint movement.
-- Enemies animate while moving and now face movement direction while running.
-- Enemy stats and round definitions are configurable through JSON.
+- World/bootstrap pipeline runs and generates arena layout.
+- Enclave ownership and reconnect flow works.
+- Top-down camera + directional sprint tuning works.
+- Wave loop state machine is implemented per enclave.
+- Lives and gold economy are stored per enclave.
+- Leak handling deducts lives and ends enclave run at 0 lives.
+- Kill handling resolves enemies and rewards bounty.
+- Between-wave income is paid during cleanup.
+- Debug rounds are routed through `WaveManager` instead of direct spawn calls.
+- `/tddebuground` controls wave debug behavior through `GameManager`.
 
-### Partially implemented / placeholder
+### Milestone 2 now implemented
 
-- `WaveManager` is still a stub.
-- `GameManager` session flow is still a stub.
-- `TowerMenuUI` is still a stub.
-- No real tower placement/build/upgrade/sell pipeline yet.
-- No combat pipeline (targeting, projectile/hit logic, leak damage, economy loop) yet.
+- Grid square occupancy model supports placed tower references.
+- Tower config schema exists in `TDConfig` and is loaded/sanitized from JSON.
+- Tower roster exists (`ARROW`, `CANNON`, `FROST`, `MAGIC`) and stats are config-driven.
+- Tower runtime model supports tiering, path lock, upgrade deltas, and sell refund.
+- Tower manager exists per enclave and is ticked with wave tick cadence.
+- Placement validation order is implemented:
+  1. square in player enclave
+  2. square type is `BUILDABLE`
+  3. square is not occupied
+  4. player has enough gold
+- Targeting + attack loop is implemented (first/last/strongest/weakest).
+- Armor reduction is applied for non-magic towers.
+- `MAGIC` ignores armor.
+- `FROST` applies timed slow that affects movement speed.
+- Sell flow is implemented with 50% refund of base + upgrade spend.
+- Command surface is available:
+  - `/tdtower place <type> <worldX> <worldZ>`
+  - `/tdtower upgrade <worldX> <worldZ> <A|B>`
+  - `/tdtower sell <worldX> <worldZ>`
+  - `/tdtower status`
 
-## Project Structure: What Each Class Does and Why
+### Still placeholder / next work
 
-### Core plugin
+- `TowerMenuUI` is still placeholder (command-driven flow is active).
+- Projectile visuals and VFX are not implemented yet (current combat is instant-hit).
+- Full path-blocking validation/mazing constraints are not implemented yet.
 
+## Class Responsibilities
+
+### Plugin composition
 - `dev.duckslock.TowerDefensePlugin`
-  - What: Main plugin entrypoint. Loads config, applies constants, registers events and commands, starts runtime
-    services.
-  - Why: Central composition root so the mod lifecycle is controlled from one place.
-
-### Camera and movement
-
-- `dev.duckslock.camera.TDCameraController`
-  - What: Applies server camera settings for top-down control.
-  - Why: WC3 TD feel depends on an RTS-like perspective and movement plane.
-- `dev.duckslock.sprint.SprintMechanicController`
-  - What: Enables sprint feature and adjusts directional run multipliers for top-down controls.
-  - Why: Default movement tuning does not feel right for camera-forced top-down gameplay.
+  - Loads config, applies constants, applies enemy/tower stat config, wires services, registers commands.
+  - Owns lifecycle start/shutdown for enclave, wave, debug-round, and tower systems.
 
 ### Config
-
 - `dev.duckslock.config.TDConfig`
-  - What: Full config schema, defaults, and sanitization for world, arena, camera, rounds, sprint, and enemy stats.
-  - Why: Keeps balancing and iteration data-driven instead of hardcoded.
+  - Defines and sanitizes world/arena/camera/gameplay/debug/enemy/tower config.
+  - Includes upgrade tier config for tower path A/B.
 - `dev.duckslock.config.TDConfigManager`
-  - What: Reads/writes `config.json`, falls back to defaults, sanitizes before use.
-  - Why: Reliable config boot process and persistent editable settings.
+  - Load-or-create config and persist sanitized output.
 - `dev.duckslock.config.ModConfigHolder`
-  - What: Global runtime holder for loaded config.
-  - Why: Simple access to config from systems that do not own plugin init.
+  - Global runtime config holder for systems initialized after plugin setup.
 
-### Enclave system (player lanes/bases)
-
+### Enclave + arena
 - `dev.duckslock.enclave.Enclave`
-  - What: Runtime model for one player's grid, owner, color, and world-space footprint.
-  - Why: Core unit of TD gameplay where each player builds and defends.
-- `dev.duckslock.enclave.EnclaveColor`
-  - What: WC3-style player color metadata.
-  - Why: Color identity is a key part of multiplayer TD readability.
-- `dev.duckslock.enclave.EnclaveAssignmentListener`
-  - What: Callback contract fired when a player is assigned/reassigned to an enclave.
-  - Why: Lets systems react to assignment without hard coupling.
+  - Runtime player lane/base state: owner, grid, lives, gold, economy/lives reset helpers.
 - `dev.duckslock.enclave.EnclaveManager`
-  - What: Generates arena blocks, preloads chunks, handles assignment/reconnect/release, teleports players, and tracks
-    post-generation tasks.
-  - Why: Owns world-space arena lifecycle and player ownership routing.
-
-### Grid and map model
-
+  - Arena generation/bootstrap, assignment/release/teleport, post-generation task queue.
+  - Creates enclaves with configured starting lives/gold.
+- `dev.duckslock.enclave.EnclaveAssignmentListener`
+  - Callback for assignment events.
+- `dev.duckslock.enclave.EnclaveColor`
+  - WC3 color slot metadata.
 - `dev.duckslock.grid.ArenaConstants`
-  - What: Runtime sizing/layout/block constants applied from config.
-  - Why: Shared source of truth for world dimensions and block palette.
+  - Shared layout constants derived from config.
 - `dev.duckslock.grid.GridSquare`
-  - What: Single build/path/base cell model with occupancy and world mapping.
-  - Why: Fundamental unit for future placement and path validation.
+  - Build cell state including `occupied`, `tower`, and `isAvailable()`.
 - `dev.duckslock.grid.GridSquareType`
-  - What: Cell role enum (`BUILDABLE`, `PATH`, `BLOCKED`, `BASE`).
-  - Why: Encodes gameplay semantics per cell.
-- `dev.duckslock.grid.GridSquareData`
-  - What: Immutable DTO for map square declarations.
-  - Why: Clean input format for static or file-loaded maps.
-- `dev.duckslock.grid.MapDefinition`
-  - What: Static sample map data with squares and waypoint list.
-  - Why: Seed content and format reference before full map tooling.
-- `dev.duckslock.grid.GridManager`
-  - What: In-memory grid lookup and coordinate conversion.
-  - Why: Fast square queries for placement and game interactions.
+  - Cell role enum (`BUILDABLE`, `PATH`, `BLOCKED`, `BASE`).
+- `dev.duckslock.grid.GridSquareData`, `MapDefinition`, `GridManager`
+  - Static map/grid utility model used by broader arena/grid logic.
 
-### Enemy system
-
-- `dev.duckslock.enemy.EnemyAssets`
-  - What: Central asset ID constants for enemy models.
-  - Why: Decouples visuals from behavior definitions.
+### Enemy + movement runtime
 - `dev.duckslock.enemy.EnemyType`
-  - What: Enum of enemy archetypes with runtime-configurable stats.
-  - Why: Defines roster and balancing knobs for wave composition.
+  - Configurable enemy archetypes with speed/armor/bounty/damage.
 - `dev.duckslock.enemy.Enemy`
-  - What: Runtime state of one enemy (hp, waypoint progress, world ref).
-  - Why: Needed to track damage, movement, and despawn lifecycle.
+  - Runtime enemy state: hp, waypoint progress, distance-to-next-waypoint, slow state, entity ref.
 - `dev.duckslock.enemy.EnemySpawner`
-  - What: Spawns/removes model entities in-world and tracks active enemies.
-  - Why: Dedicated bridge between logical enemies and actual world entities.
-
-### Debug wave tooling
-
-- `dev.duckslock.commands.DebugRoundDefinition`
-  - What: Immutable round model (waypoints + spawn batches).
-  - Why: Separates round data from execution logic.
-- `dev.duckslock.commands.DebugRoundDefinitions`
-  - What: Loads/validates configured debug rounds and exposes lookup APIs.
-  - Why: Centralized round parsing and validation.
+  - Spawn/remove world entities for enemy runtime objects.
+- `dev.duckslock.enemy.EnemyAssets`
+  - Enemy model asset ID constants.
 - `dev.duckslock.commands.ArenaDebugRoundService`
-  - What: Schedules and runs debug rounds, moves enemies by waypoint, applies movement animation/state, and handles
-    cleanup.
-  - Why: Fast gameplay iteration loop before full production wave system.
-- `dev.duckslock.commands.DebugRoundCommand`
-  - What: `/tddebuground` command interface for enabling, selecting, and spawning rounds.
-  - Why: In-game manual control for balancing and rapid testing.
+  - Internal spawn/movement worker for wave-driven debug rounds.
+  - Tracks active enemies, moves by waypoints, applies facing/animation/movement states.
+  - Exposes enemy list + kill resolution hooks used by tower combat loop.
 
-### Future gameplay scaffolding
+### Wave + game orchestration
 
-- `dev.duckslock.game.GameManager`
-  - What: Placeholder for session-level game flow.
-  - Why: Intended home for round lifecycle, players, win/loss states.
 - `dev.duckslock.wave.WaveManager`
-  - What: Placeholder for production wave progression system.
-  - Why: Will replace debug-only flow with real progression.
-- `dev.duckslock.ui.TowerMenuUI`
-  - What: Placeholder for placement/upgrade/sell UI.
-  - Why: Required for actual tower gameplay loop.
+  - Per-enclave wave state machine:
+    - `IDLE -> PREPARE -> SPAWNING -> ACTIVE -> CLEANUP -> IDLE`
+  - Handles countdown/cleanup timers, active enemy counts, early-wave flag, and resolve callbacks.
+- `dev.duckslock.game.GameManager`
+  - Owns per-enclave `WaveManager` + `TowerManager`.
+  - Ticks both systems on one scheduler.
+  - Routes debug-round start requests.
+  - Handles enclave loss reset behavior.
 
-## Useful Commands During Development
+### Tower gameplay (Milestone 2)
+
+- `dev.duckslock.tower.TowerType`
+  - Config-driven base stats + upgrade path definitions.
+- `dev.duckslock.tower.UpgradeTier`
+  - Upgrade data record (`cost`, `name`, `statDeltas`).
+- `dev.duckslock.tower.UpgradePath`
+  - `PATH_A` / `PATH_B`.
+- `dev.duckslock.tower.TargetPriority`
+  - Target selection mode (`FIRST`, `LAST`, `STRONGEST`, `WEAKEST`).
+- `dev.duckslock.tower.Tower`
+  - Runtime placed tower state: type, tier, path, square/enclave ref, entity ref, target, attack timing.
+  - Applies upgrade deltas and computes effective stats.
+- `dev.duckslock.tower.TowerManager`
+  - Per-enclave tower owner.
+  - Placement validation and spawn, upgrade, sell/remove, attack tick, target selection.
+  - Applies armor/slow/magic-ignore rules and resolves kills through debug-round runtime.
+
+### Commands
+- `dev.duckslock.commands.DebugRoundDefinition`
+  - Immutable debug round model.
+- `dev.duckslock.commands.DebugRoundDefinitions`
+  - Parse/validate configured debug rounds.
+- `dev.duckslock.commands.DebugRoundCommand`
+  - `/tddebuground` control surface routed to `GameManager`/`WaveManager`.
+- `dev.duckslock.commands.TowerCommand`
+  - `/tdtower` command surface for placement/upgrade/sell/status.
+
+### Camera + movement control
+
+- `dev.duckslock.camera.TDCameraController`
+  - Applies custom top-down camera packet settings.
+- `dev.duckslock.sprint.SprintMechanicController`
+  - Applies directional sprint fixes for top-down movement.
+
+### UI placeholder
+- `dev.duckslock.ui.TowerMenuUI`
+  - Reserved for menu-driven placement/upgrade/sell flow (not active yet).
+
+## Development Commands
 
 - Start dev server:
   - `.\gradlew.bat devServer`
 - Compile:
-  - `.\gradlew.bat compileJava`
-- Debug rounds command:
+  - `.\gradlew.bat build`
+- Wave debug:
   - `/tddebuground status`
   - `/tddebuground enable`
   - `/tddebuground set <roundId>`
   - `/tddebuground spawn [enclaveIndex] [roundId]`
+- Tower debug:
+  - `/tdtower status`
+  - `/tdtower place <type> <worldX> <worldZ>`
+  - `/tdtower upgrade <worldX> <worldZ> <A|B>`
+  - `/tdtower sell <worldX> <worldZ>`
 
-## Next Steps To Make This Truly WC3 Tower Defense in Hytale
+## Next Steps
 
-### Milestone 1: Playable core loop
+### Milestone 3 (Pathing and Mazing Rules)
 
-1. Implement `WaveManager` with wave state machine (`prepare -> spawn -> cleanup -> next`).
-2. Add player lives/base health per enclave and leak damage when enemies reach base.
-3. Add gold income, bounty payout, and between-wave prep windows.
-4. Move debug spawning logic behind a production wave API (keep debug as override mode).
+1. Replace static waypoint-only routing with grid pathfinding.
+2. Enforce "path must remain open" validation during placement.
+3. Recompute active enemy paths safely when layout changes.
+4. Add dedicated blocked/special terrain lane behavior.
 
-### Milestone 2: Real tower gameplay
+### Milestone 4 (Polish and Game Feel)
 
-1. Implement tower placement validation on `GridSquare` (`BUILDABLE`, ownership, occupancy).
-2. Add tower archetypes (single target, splash, slow, support aura) with WC3-like identities.
-3. Add targeting rules (first/last/strong/close), attack cadence, and damage pipeline.
-4. Add upgrade tiers and sell/refund behavior.
+1. Add projectile visuals and hit VFX.
+2. Add richer armor/damage typing interactions.
+3. Add stronger wave pacing controls and difficulty scaling.
+4. Surface full game HUD and tower UI (replace command-only flow).
 
-### Milestone 3: Pathing and mazing rules
+### Milestone 5 (Content and Multiplayer Robustness)
 
-1. Replace static waypoint movement with pathfinding over enclave grid.
-2. Enforce "path must remain open" validation when placing towers.
-3. Support dynamic path recompute for enemies already in the lane.
-4. Add blocked-cell and special terrain behavior for map design variety.
-
-### Milestone 4: WC3 polish systems
-
-1. Add armor/damage typing and resist interactions.
-2. Add special creep traits (fast, armored, magic immune, boss phases, summons).
-3. Add game pacing tools: interest ticks, bonus rounds, difficulty scaling.
-4. Add per-player and match-wide UI (lives, wave timer, net worth, leak alerts).
-
-### Milestone 5: Multiplayer quality and content
-
-1. Build robust reconnection and late-join spectator behavior.
-2. Add deterministic simulation checks and stress/performance profiling.
-3. Add map packs, presets, and modifiable wave scripts.
-4. Add saveable presets for balance iteration and automated test scenarios.
-
-## Definition of "WC3-feel" for this project
-
-The game should feel WC3-like when:
-
-- Players make meaningful economy vs defense decisions every wave.
-- Tower identities are distinct and upgrade paths are strategic.
-- Mazing is skillful but constrained by fair path rules.
-- Leaks and wave spikes create pressure and comeback moments.
-- Team readability is instant via color/lane/UI and creep behavior clarity.
+1. Add more tower rosters and enemy variants/boss behaviors.
+2. Add map presets and wave scripting packs.
+3. Improve reconnect/spectator/end-state handling.
+4. Add repeatable balancing scenarios and stress tests.

@@ -120,6 +120,31 @@ public class ArenaDebugRoundService {
         }
     }
 
+    public List<Enemy> getActiveEnemiesForEnclave(int enclaveIndex) {
+        List<Enemy> result = new ArrayList<>();
+        for (TrackedEnemy tracked : trackedEnemies.values()) {
+            Enemy enemy = tracked.enemy;
+            if (enemy.getEnclaveIndex() == enclaveIndex && !enemy.isDead()) {
+                result.add(enemy);
+            }
+        }
+        return result;
+    }
+
+    public boolean resolveEnemyKilledFromCombat(Enemy enemy) {
+        if (enemy == null) {
+            return false;
+        }
+
+        TrackedEnemy tracked = trackedEnemies.remove(enemy.getId());
+        if (tracked == null) {
+            return false;
+        }
+
+        resolveKilledEnemy(tracked, false);
+        return true;
+    }
+
     private void spawnOneEnemy(
             Enclave enclave,
             DebugRoundDefinition.SpawnBatch batch,
@@ -165,14 +190,19 @@ public class ArenaDebugRoundService {
     }
 
     private void updateMovement(World world) {
+        long nowMs = System.currentTimeMillis();
         for (TrackedEnemy tracked : trackedEnemies.values()) {
-            moveEnemy(world, tracked);
+            moveEnemy(world, tracked, nowMs);
         }
     }
 
-    private void moveEnemy(World world, TrackedEnemy tracked) {
+    private void moveEnemy(World world, TrackedEnemy tracked, long nowMs) {
+        if (trackedEnemies.get(tracked.enemy.getId()) != tracked) {
+            return;
+        }
+
         if (tracked.enemy.isDead()) {
-            resolveKilledEnemy(tracked);
+            resolveKilledEnemy(tracked, true);
             return;
         }
 
@@ -221,13 +251,19 @@ public class ArenaDebugRoundService {
             dy = target.y - current.y;
             dz = target.z - current.z;
             distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            tracked.enemy.advanceWaypoint();
         }
 
         if (distance <= 0.0001d) {
+            tracked.enemy.setDistanceToNextWaypoint(distance);
             return;
         }
 
-        double maxStep = baseMoveBlocksPerSecond * tracked.enemy.getType().speed * (movementTickMs / 1000.0d);
+        tracked.enemy.setDistanceToNextWaypoint(distance);
+        double maxStep = baseMoveBlocksPerSecond
+                * tracked.enemy.getType().speed
+                * tracked.enemy.getCurrentSpeedMultiplier(nowMs)
+                * (movementTickMs / 1000.0d);
         double step = Math.min(distance, maxStep);
         double scale = step / distance;
 
@@ -242,8 +278,10 @@ public class ArenaDebugRoundService {
         tracked.enemy.setPosition(next.toVector3f());
     }
 
-    private void resolveKilledEnemy(TrackedEnemy tracked) {
-        trackedEnemies.remove(tracked.enemy.getId());
+    private void resolveKilledEnemy(TrackedEnemy tracked, boolean removeFromTrackedMap) {
+        if (removeFromTrackedMap) {
+            trackedEnemies.remove(tracked.enemy.getId());
+        }
         enemySpawner.remove(tracked.enemy);
 
         int bounty = tracked.enemy.getType().getBounty();

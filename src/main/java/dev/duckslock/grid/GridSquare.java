@@ -1,5 +1,7 @@
 package dev.duckslock.grid;
 
+import dev.duckslock.tower.Tower;
+
 import javax.annotation.Nullable;
 import java.util.UUID;
 
@@ -15,6 +17,10 @@ public class GridSquare {
     private final int enclaveIndex;
 
     private GridSquareType type;
+    private boolean occupied;
+
+    @Nullable
+    private Tower tower;
 
     @Nullable
     private UUID towerOwnerUuid;
@@ -34,11 +40,15 @@ public class GridSquare {
     }
 
     public boolean isOccupied() {
-        return towerOwnerUuid != null;
+        return occupied;
+    }
+
+    public boolean isAvailable() {
+        return type == GridSquareType.BUILDABLE && !occupied;
     }
 
     public boolean isBuildable() {
-        return type == GridSquareType.BUILDABLE && !isOccupied();
+        return isAvailable();
     }
 
     public boolean containsWorldPos(int wx, int wz) {
@@ -54,6 +64,8 @@ public class GridSquare {
     }
 
     public void clearTower() {
+        occupied = false;
+        tower = null;
         towerOwnerUuid = null;
     }
 
@@ -92,6 +104,16 @@ public class GridSquare {
 
     public void setTowerOwner(@Nullable UUID uuid) {
         this.towerOwnerUuid = uuid;
+    }
+
+    @Nullable
+    public Tower getTower() {
+        return tower;
+    }
+
+    public void setTower(@Nullable Tower tower) {
+        this.tower = tower;
+        this.occupied = tower != null;
     }
 
     @Override
